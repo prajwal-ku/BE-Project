@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Leaf, Eye, EyeOff } from "lucide-react"
@@ -20,12 +20,32 @@ export default function LoginPage() {
   const router = useRouter()
   const supabase = createClient()
 
+  // Prevent back navigation after login
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // Check if user is authenticated
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          // If user is logged in and tries to go back to login page, prevent it
+          window.history.forward()
+        }
+      })
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [supabase.auth])
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
 
     try {
+      // 1. Authenticate with Supabase Auth
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -38,12 +58,37 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        // Login successful → redirect to main dashboard
-        router.push("/dashboard")
-      } else {
-        setError("Login failed. Please check your credentials.")
+        // 2. Get user role from auth_roles table
+        const { data: roleData, error: roleError } = await supabase
+          .from('auth_roles')
+          .select('role')
+          .eq('id', data.user.id)
+          .single()
+
+        if (roleError) {
+          console.log('Role fetch error:', roleError)
+          setError("User role not found. Please contact administrator.")
+          setIsLoading(false)
+          return
+        }
+
+        if (roleData) {
+          // 3. Replace history to prevent back navigation to login
+          const dashboardPath = 
+            roleData.role === 'admin' ? "/admin/dashboard" :
+            roleData.role === 'farmer' ? "/farmer/dashboard" :
+            roleData.role === 'manufacturer' ? "/manufacturer/dashboard" :
+            roleData.role === 'distributor' ? "/distributor/dashboard" :
+            roleData.role === 'retailer' ? "/retailer/dashboard" : "/dashboard"
+
+          // Replace current history entry with dashboard
+          router.replace(dashboardPath)
+        } else {
+          setError("User role not found. Please contact administrator.")
+        }
       }
     } catch (err: unknown) {
+      console.log('Login error:', err)
       setError(err instanceof Error ? err.message : "An unexpected error occurred.")
     } finally {
       setIsLoading(false)
@@ -94,7 +139,7 @@ export default function LoginPage() {
                     />
                     <button
                       type="button"
-                      className="absolute right-3 top-9 text-gray-500 hover:text-gray-700"
+                      className="absolute right-3 top-9 text-muted-foreground hover:text-foreground"
                       onClick={() => setShowPassword((prev) => !prev)}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

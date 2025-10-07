@@ -24,50 +24,51 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const router = useRouter()
+  const supabase = createClient()
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setError(null)
 
-    // Password validation
     if (password !== confirmPassword) {
       setError("Passwords do not match")
       setIsLoading(false)
       return
     }
 
-    // Role validation
     if (!role) {
       setError("Please select a role")
       setIsLoading(false)
       return
     }
 
-    const supabase = createClient()
-
     try {
-      // Sign up the user
-      const { data, error: authError } = await supabase.auth.signUp({
+      // 1. Sign up the user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/auth/callback`,
-          data: {
-            full_name: fullName,
-            role: role,
-          },
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       })
 
       if (authError) throw authError
 
-      // ✅ Success: email confirmation required
-      console.log("Sign up successful! Confirmation email sent to:", email)
+      if (authData.user) {
+        // 2. Store role in auth_roles table
+        const { error: roleError } = await supabase
+          .from('auth_roles')
+          .insert([{
+            id: authData.user.id,
+            role: role
+          }])
 
-      // Redirect to success page
-      router.push("/auth/register-success")
+        if (roleError) throw roleError
+
+        // 3. Redirect to success page
+        router.push("/auth/register-success")
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "An unexpected error occurred.")
     } finally {
@@ -92,7 +93,7 @@ export default function RegisterPage() {
           <Card className="bg-card/50 backdrop-blur border-border">
             <CardHeader>
               <CardTitle className="text-2xl">Create Account</CardTitle>
-              <CardDescription>Register to start tracking your supply chain</CardDescription>
+              <CardDescription>Register to access your agricultural platform</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleRegister}>
@@ -123,7 +124,7 @@ export default function RegisterPage() {
                     />
                   </div>
 
-                  {/* Role */}
+                  {/* Role - Updated */}
                   <div className="grid gap-2">
                     <Label htmlFor="role">Role</Label>
                     <Select value={role} onValueChange={setRole}>
@@ -132,8 +133,10 @@ export default function RegisterPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="supplier">Supplier</SelectItem>
-                        <SelectItem value="consignee">Consignee</SelectItem>
+                        <SelectItem value="farmer">Farmer</SelectItem>
+                        <SelectItem value="manufacturer">Manufacturer</SelectItem>
+                        <SelectItem value="distributor">Distributor</SelectItem>
+                        <SelectItem value="retailer">Retailer</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -176,10 +179,8 @@ export default function RegisterPage() {
                     </button>
                   </div>
 
-                  {/* Error */}
                   {error && <p className="text-sm text-destructive">{error}</p>}
 
-                  {/* Submit */}
                   <Button
                     type="submit"
                     className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600"
@@ -189,7 +190,6 @@ export default function RegisterPage() {
                   </Button>
                 </div>
 
-                {/* Login Link */}
                 <div className="mt-4 text-center text-sm">
                   Already have an account?{" "}
                   <Link href="/auth/login" className="text-primary underline underline-offset-4">
