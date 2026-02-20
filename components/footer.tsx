@@ -88,7 +88,7 @@ export function Footer() {
                 <Twitter className="h-5 w-5" />
               </a>
               <a
-                href="https://linkedin.com"
+                href="https://www.linkedin.com/in/prajwal-kudapane-9018a0229/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 rounded-lg bg-muted hover:bg-primary/20 transition-colors"
@@ -96,7 +96,7 @@ export function Footer() {
                 <Linkedin className="h-5 w-5" />
               </a>
               <a
-                href="https://instagram.com"
+                href="https://www.instagram.com/physics_feeds/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 rounded-lg bg-muted hover:bg-primary/20 transition-colors"

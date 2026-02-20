@@ -1,51 +1,53 @@
+// app/api/blockchain/route.js
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Helper functions for database operations
 class DatabaseService {
-  // Create farmer profile if not exists
-  static async createFarmerProfile(userId, email) {
+  // Create or update farmer profile using existing columns
+  static async ensureFarmerProfile(userId, email, farmLocation = '') {
     try {
-      // Check if profile already exists
-      const { data: existingProfile, error: checkError } = await supabase
+      const { data: existingProfile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (checkError && checkError.code !== 'PGRST116') {
-        throw checkError;
-      }
+      const profileData = {
+        id: userId,
+        email: email,
+        role: 'farmer',
+        address: farmLocation, // Using 'address' column for farm location
+        business_name: `${email?.split('@')[0] || 'Farmer'} Farms`,
+        verified: true
+      };
 
       if (!existingProfile) {
-        // Create new farmer profile
         const { data: profile, error } = await supabase
           .from('profiles')
-          .insert([
-            {
-              id: userId,
-              role: 'farmer',
-              email: email,
-              business_name: `${email.split('@')[0]} Farms`,
-              verified: true,
-              created_at: new Date().toISOString()
-            }
-          ])
+          .insert([profileData])
+          .select()
+          .single();
+
+        if (error) throw error;
+        console.log('✅ Farmer profile created');
+        return profile;
+      } else {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .update(profileData)
+          .eq('id', userId)
           .select()
           .single();
 
         if (error) throw error;
         return profile;
       }
-
-      return existingProfile;
     } catch (error) {
-      console.error('Error creating farmer profile:', error);
+      console.error('Error ensuring farmer profile:', error);
       throw error;
     }
   }
@@ -53,53 +55,83 @@ class DatabaseService {
   // Register product in database
   static async registerProduct(productData) {
     try {
+      console.log('🔄 Starting product registration...', {
+        farmer_id: productData.farmer_id,
+        product_name: productData.product_name
+      });
+
+      // Ensure farmer profile exists
+      await this.ensureFarmerProfile(
+        productData.farmer_id, 
+        productData.farmer_email, 
+        productData.farm_location
+      );
+
+      const batchNumber = productData.batch_number || `BATCH_${Date.now()}`;
+      
+      const productInsertData = {
+        farmer_id: productData.farmer_id,
+        product_name: productData.product_name,
+        category: productData.category || 'Other',
+        quantity: Number(productData.quantity),
+        harvest_date: productData.harvest_date || null,
+        farm_location: productData.farm_location,
+        quality_metrics: { 
+          grade: productData.quality_grade,
+          quantity: productData.quantity
+        },
+        qr_code_hash: productData.qr_code_hash,
+        batch_number: batchNumber,
+        price_per_quintal: Number(productData.price_per_quintal) || 0,
+        current_owner: 'Farmer',
+        status: 'Registered',
+        description: productData.description || '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      console.log('🔄 Inserting product into database:', productInsertData);
+
       const { data: product, error } = await supabase
         .from('products')
-        .insert([
-          {
-            farmer_id: productData.farmerId,
-            product_name: productData.productType,
-            category: 'agricultural',
-            harvest_date: productData.harvestDate || new Date().toISOString().split('T')[0],
-            quality_metrics: { 
-              grade: productData.quality, 
-              quantity: productData.quantity,
-              farmLocation: productData.farmLocation,
-              customProductId: productData.productId // Store custom ID for tracking
-            },
-            organic_certifications: {},
-            qr_code_hash: productData.qrCode,
-            description: `${productData.productType} from ${productData.farmLocation}`,
-            batch_number: `batch_${Date.now()}`
-          }
-        ])
+        .insert([productInsertData])
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ Database insertion error:', error);
+        throw error;
+      }
+
+      console.log('✅ Product inserted successfully:', product.id);
 
       // Create initial transaction
-      const price = this.calculatePrice(productData.quality, productData.quantity);
+      const transactionData = {
+        product_id: product.id,
+        from_user_id: productData.farmer_id,
+        to_user_id: productData.farmer_id,
+        transaction_type: 'REGISTRATION',
+        price: productData.price_per_quintal,
+        quantity: productData.quantity,
+        transaction_hash: `TX_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        transaction_time: new Date().toISOString(),
+        location: productData.farm_location,
+        notes: `Product registration: ${productData.product_name}`,
+        quality_check_passed: true,
+        created_at: new Date().toISOString()
+      };
+
       const { data: transaction, error: txError } = await supabase
         .from('transactions')
-        .insert([
-          {
-            product_id: product.id,
-            from_user_id: productData.farmerId,
-            to_user_id: productData.farmerId, // Self for registration
-            transaction_type: 'farm_to_distributor',
-            price: price,
-            quantity: productData.quantity,
-            transaction_hash: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            location: productData.farmLocation,
-            notes: 'Product registered by farmer on blockchain',
-            quality_check_passed: true
-          }
-        ])
+        .insert([transactionData])
         .select()
         .single();
 
-      if (txError) throw txError;
+      if (txError) {
+        console.warn('⚠️ Transaction creation failed:', txError);
+      } else {
+        console.log('✅ Transaction created successfully');
+      }
 
       return {
         product: product,
@@ -107,7 +139,7 @@ class DatabaseService {
       };
 
     } catch (error) {
-      console.error('Error registering product:', error);
+      console.error('❌ Error registering product:', error);
       throw error;
     }
   }
@@ -117,61 +149,48 @@ class DatabaseService {
     try {
       const { data: products, error } = await supabase
         .from('products')
-        .select(`
-          *,
-          transactions (
-            *,
-            from_user:profiles!transactions_from_user_id_fkey (email, business_name),
-            to_user:profiles!transactions_to_user_id_fkey (email, business_name)
-          )
-        `)
+        .select('*')
         .eq('farmer_id', farmerId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-
-      // Format the data to match your existing frontend structure
-      const formattedProducts = products.map(product => {
-        const price = this.calculatePrice(
-          product.quality_metrics?.grade || 'A',
-          product.quality_metrics?.quantity || 0
-        );
-
-        return {
-          productId: product.id, // Use the actual UUID from database
-          productType: product.product_name,
-          quantity: `${product.quality_metrics?.quantity || 0} kg`,
-          status: 'Registered',
-          timestamp: product.created_at,
-          currentOwner: 'Farmer',
-          price: `₹${price}/kg`,
-          farmerId: product.farmer_id,
-          qrCode: product.qr_code_hash,
-          harvestDate: product.harvest_date,
-          quality: product.quality_metrics?.grade || 'A',
-          history: product.transactions?.map(tx => ({
-            action: this.getActionFromTransactionType(tx.transaction_type),
-            by: tx.to_user?.business_name || tx.to_user?.email || 'Farmer',
-            timestamp: tx.transaction_time,
-            details: tx.notes
-          })) || []
-        };
-      });
-
-      return formattedProducts;
+      return products || [];
     } catch (error) {
       console.error('Error getting farmer products:', error);
       throw error;
     }
   }
 
-  // Get product history - IMPROVED SEARCH
-  static async getProductHistory(productId) {
+  // Get farmer profile
+  static async getFarmerProfile(farmerId) {
     try {
-      console.log('🔍 Searching for product with ID:', productId);
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', farmerId)
+        .single();
+
+      if (error) throw error;
+      return profile;
+    } catch (error) {
+      console.error('Error getting farmer profile:', error);
+      throw error;
+    }
+  }
+
+  // Track product by various identifiers
+  static async trackProduct(trackingId) {
+    try {
+      console.log('🔍 Tracking product:', trackingId);
       
-      // First try to find by UUID (database ID)
-      let { data: product, error: productError } = await supabase
+      if (!trackingId || trackingId.trim() === '') {
+        throw new Error('Tracking ID is required');
+      }
+
+      const cleanTrackingId = trackingId.trim();
+
+      // Try by batch number first
+      let { data: product, error } = await supabase
         .from('products')
         .select(`
           *,
@@ -181,13 +200,14 @@ class DatabaseService {
             to_user:profiles!transactions_to_user_id_fkey (email, business_name)
           )
         `)
-        .eq('id', productId)
+        .eq('batch_number', cleanTrackingId)
         .single();
 
-      // If not found by UUID, try to find by custom product ID in quality_metrics
-      if (productError || !product) {
-        console.log('🔍 Not found by UUID, trying custom product ID...');
-        const { data: products, error } = await supabase
+      if (error || !product) {
+        console.log('🔍 Not found by batch number, trying by ID...');
+        
+        // Try by product ID
+        const { data: productById } = await supabase
           .from('products')
           .select(`
             *,
@@ -197,13 +217,14 @@ class DatabaseService {
               to_user:profiles!transactions_to_user_id_fkey (email, business_name)
             )
           `)
-          .eq('quality_metrics->>customProductId', productId)
+          .eq('id', cleanTrackingId)
           .single();
 
-        if (error || !products) {
-          console.log('🔍 Not found by custom ID, trying product name...');
-          // Try by product name as fallback
-          const { data: nameProducts, error: nameError } = await supabase
+        if (productById) {
+          product = productById;
+        } else {
+          // Try by product name (partial match)
+          const { data: productsByName } = await supabase
             .from('products')
             .select(`
               *,
@@ -213,123 +234,28 @@ class DatabaseService {
                 to_user:profiles!transactions_to_user_id_fkey (email, business_name)
               )
             `)
-            .ilike('product_name', `%${productId}%`)
-            .limit(1)
-            .single();
+            .ilike('product_name', `%${cleanTrackingId}%`)
+            .limit(1);
 
-          if (nameError || !nameProducts) {
-            throw new Error('Product not found');
+          if (productsByName && productsByName.length > 0) {
+            product = productsByName[0];
+          } else {
+            throw new Error(`Product not found: ${cleanTrackingId}`);
           }
-          product = nameProducts;
-        } else {
-          product = products;
         }
       }
 
       console.log('✅ Product found:', product.id);
+      return product;
 
-      const price = this.calculatePrice(
-        product.quality_metrics?.grade || 'A',
-        product.quality_metrics?.quantity || 0
-      );
-
-      const formattedProduct = {
-        productId: product.id,
-        productType: product.product_name,
-        quantity: `${product.quality_metrics?.quantity || 0} kg`,
-        status: 'Registered',
-        timestamp: product.created_at,
-        currentOwner: 'Farmer',
-        price: `₹${price}/kg`,
-        farmerId: product.farmer_id,
-        qrCode: product.qr_code_hash,
-        harvestDate: product.harvest_date,
-        quality: product.quality_metrics?.grade || 'A',
-        history: product.transactions?.map(tx => ({
-          action: this.getActionFromTransactionType(tx.transaction_type),
-          by: tx.to_user?.business_name || tx.to_user?.email || 'Farmer',
-          timestamp: tx.transaction_time,
-          details: tx.notes
-        })) || []
-      };
-
-      return formattedProduct;
     } catch (error) {
-      console.error('❌ Error getting product history:', error.message);
+      console.error('❌ Error tracking product:', error.message);
       throw error;
     }
-  }
-
-  // Search products
-  static async searchProducts(searchTerm) {
-    try {
-      const { data: products, error } = await supabase
-        .from('products')
-        .select(`
-          *,
-          transactions (
-            *,
-            from_user:profiles!transactions_from_user_id_fkey (email, business_name),
-            to_user:profiles!transactions_to_user_id_fkey (email, business_name)
-          )
-        `)
-        .or(`product_name.ilike.%${searchTerm}%,quality_metrics->>customProductId.ilike.%${searchTerm}%`)
-        .limit(10);
-
-      if (error) throw error;
-
-      return products.map(product => {
-        const price = this.calculatePrice(
-          product.quality_metrics?.grade || 'A',
-          product.quality_metrics?.quantity || 0
-        );
-
-        return {
-          productId: product.id,
-          productType: product.product_name,
-          quantity: `${product.quality_metrics?.quantity || 0} kg`,
-          status: 'Registered',
-          timestamp: product.created_at,
-          currentOwner: 'Farmer',
-          price: `₹${price}/kg`,
-          farmerId: product.farmer_id,
-          qrCode: product.qr_code_hash,
-          history: product.transactions?.map(tx => ({
-            action: this.getActionFromTransactionType(tx.transaction_type),
-            by: tx.to_user?.business_name || tx.to_user?.email || 'Farmer',
-            timestamp: tx.transaction_time,
-            details: tx.notes
-          })) || []
-        };
-      });
-    } catch (error) {
-      console.error('Error searching products:', error);
-      throw error;
-    }
-  }
-
-  // Helper methods
-  static calculatePrice(quality, quantity) {
-    const basePrice = {
-      'A': 40,
-      'B': 30,
-      'C': 20
-    }[quality] || 25;
-    
-    return basePrice * quantity;
-  }
-
-  static getActionFromTransactionType(transactionType) {
-    const actions = {
-      'farm_to_distributor': 'Registered on Blockchain',
-      'distributor_to_retailer': 'Transferred to Retailer',
-      'retailer_to_consumer': 'Sold to Consumer'
-    };
-    return actions[transactionType] || 'Transaction Processed';
   }
 }
 
-// Simulated blockchain storage (fallback - will use database primarily)
+// In-memory fallback storage
 let blockchainProducts = [];
 
 export async function POST(request) {
@@ -341,143 +267,117 @@ export async function POST(request) {
     switch (action) {
       case 'registerProduct':
         try {
-          // Ensure farmer profile exists
-          await DatabaseService.createFarmerProfile(data.farmerId, data.farmerName);
-          
-          // Register product in REAL database
-          const result = await DatabaseService.registerProduct(data);
-
-          // Also add to simulated storage for immediate frontend response
-          const newProduct = {
-            productId: result.product.id, // Use the actual UUID from database
-            productType: data.productType,
-            quantity: `${data.quantity} kg`,
-            status: "Registered",
-            timestamp: new Date().toISOString(),
-            currentOwner: "Farmer",
-            price: "₹" + (data.quality === "A" ? "40" : data.quality === "B" ? "30" : "20") + "/kg",
-            farmerId: data.farmerId,
-            farmerName: data.farmerName,
-            qrCode: data.qrCode,
-            harvestDate: data.harvestDate,
-            quality: data.quality,
-            history: [
-              { 
-                action: "Registered", 
-                by: data.farmerName || "Farmer", 
-                timestamp: new Date().toISOString(),
-                details: "Product registered on blockchain"
-              }
-            ]
-          };
-
-          blockchainProducts.push(newProduct);
-          
-          return NextResponse.json({ 
-            success: true, 
-            productId: result.product.id, // Return the actual UUID
-            transactionId: result.transaction.transaction_hash,
-            timestamp: new Date().toISOString()
-          });
-
-        } catch (dbError) {
-          console.error('❌ Database error, using fallback:', dbError);
-          
-          // Fallback to simulated storage if database fails
-          const newProduct = {
-            productId: data.productId,
-            productType: data.productType,
-            quantity: `${data.quantity} kg`,
-            status: "Registered",
-            timestamp: new Date().toISOString(),
-            currentOwner: "Farmer",
-            price: "₹" + (data.quality === "A" ? "40" : data.quality === "B" ? "30" : "20") + "/kg",
-            farmerId: data.farmerId,
-            farmerName: data.farmerName,
-            qrCode: data.qrCode,
-            harvestDate: data.harvestDate,
-            quality: data.quality,
-            history: [
-              { 
-                action: "Registered", 
-                by: data.farmerName || "Farmer", 
-                timestamp: new Date().toISOString(),
-                details: "Product registered on blockchain"
-              }
-            ]
-          };
-
-          blockchainProducts.push(newProduct);
-          
-          return NextResponse.json({ 
-            success: true, 
-            productId: data.productId,
-            transactionId: `tx_${Date.now()}`,
-            timestamp: new Date().toISOString()
-          });
-        }
-
-      case 'getProductHistory':
-        try {
-          console.log('🔍 Tracking product:', data.productId);
-          // Try database first
-          const product = await DatabaseService.getProductHistory(data.productId);
-          console.log('✅ Product found in database');
-          return NextResponse.json({ 
-            success: true, 
-            history: product // Return the product data as history
-          });
-        } catch (dbError) {
-          console.error('❌ Database error, using fallback:', dbError.message);
-          
-          // Fallback to simulated storage
-          const product = blockchainProducts.find(p => 
-            p.productId === data.productId || 
-            p.qrCode?.includes(data.productId) ||
-            p.productType.toLowerCase().includes(data.productId.toLowerCase())
-          );
-          
-          if (product) {
-            console.log('✅ Product found in fallback storage');
-            return NextResponse.json({ 
-              success: true, 
-              history: product 
-            });
-          } else {
-            console.log('❌ Product not found anywhere');
+          // Validate required fields
+          if (!data?.product_name || !data?.farmer_id || !data?.farm_location) {
             return NextResponse.json({ 
               success: false, 
-              error: 'Product not found' 
-            }, { status: 404 });
+              error: 'Missing required fields: product_name, farmer_id, farm_location' 
+            }, { status: 400 });
           }
+
+          const result = await DatabaseService.registerProduct(data);
+          return NextResponse.json({ 
+            success: true, 
+            message: 'Product registered successfully',
+            data: {
+              productId: result.product.id,
+              batchNumber: result.product.batch_number,
+              productName: result.product.product_name,
+              transactionId: result.transaction?.id,
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (dbError) {
+          console.error('❌ Database registration error:', dbError);
+          return NextResponse.json({ 
+            success: false, 
+            error: dbError.message 
+          }, { status: 500 });
+        }
+
+      case 'trackProduct':
+        try {
+          if (!data?.trackingId) {
+            return NextResponse.json({ 
+              success: false, 
+              error: 'Tracking ID is required' 
+            }, { status: 400 });
+          }
+
+          const product = await DatabaseService.trackProduct(data.trackingId);
+          return NextResponse.json({ 
+            success: true, 
+            message: 'Product found',
+            data: {
+              product: product,
+              transactions: product.transactions || []
+            }
+          });
+        } catch (dbError) {
+          console.error('❌ Database tracking error:', dbError.message);
+          return NextResponse.json({ 
+            success: false, 
+            error: dbError.message 
+          }, { status: 404 });
         }
 
       case 'getFarmerProducts':
         try {
-          // Try database first
-          const farmerProducts = await DatabaseService.getFarmerProducts(data.farmerId);
+          if (!data?.farmerId) {
+            return NextResponse.json({ 
+              success: false, 
+              error: 'Farmer ID is required' 
+            }, { status: 400 });
+          }
+
+          const products = await DatabaseService.getFarmerProducts(data.farmerId);
           return NextResponse.json({ 
             success: true, 
-            products: farmerProducts 
+            message: 'Products retrieved successfully',
+            data: {
+              products: products 
+            }
           });
         } catch (dbError) {
-          console.error('Database error, using fallback:', dbError);
-          
-          // Fallback to simulated storage
-          const farmerProducts = blockchainProducts.filter(p => 
-            p.farmerId === data.farmerId
-          );
-          
+          console.error('Database error fetching farmer products:', dbError);
+          return NextResponse.json({ 
+            success: false, 
+            error: dbError.message 
+          });
+        }
+
+      case 'getFarmerProfile':
+        try {
+          if (!data?.farmerId) {
+            return NextResponse.json({ 
+              success: false, 
+              error: 'Farmer ID is required' 
+            }, { status: 400 });
+          }
+
+          const profile = await DatabaseService.getFarmerProfile(data.farmerId);
           return NextResponse.json({ 
             success: true, 
-            products: farmerProducts 
+            message: 'Profile retrieved successfully',
+            data: {
+              profile: profile 
+            }
+          });
+        } catch (dbError) {
+          console.error('Database error getting profile:', dbError);
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Profile not found',
+            data: {
+              profile: null 
+            }
           });
         }
 
       default:
         return NextResponse.json({ 
           success: false, 
-          error: 'Unknown action' 
+          error: `Unknown action: ${action}` 
         }, { status: 400 });
     }
   } catch (error) {
@@ -489,30 +389,36 @@ export async function POST(request) {
   }
 }
 
-// Also add GET for testing
 export async function GET() {
   try {
-    // Try to get stats from database
-    const { data: products, error } = await supabase
+    const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('*');
+      .select('id')
+      .limit(1);
+    
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id')
+      .limit(1);
 
-    if (!error) {
-      return NextResponse.json({ 
-        message: 'Blockchain API + Database is working',
-        database: 'Connected to Supabase',
-        totalProductsInDB: products.length,
-        totalProductsInMemory: blockchainProducts.length
-      });
-    } else {
-      throw error;
-    }
+    const dbStatus = (!productsError && !profilesError) ? 'Connected' : 'Error';
+
+    return NextResponse.json({ 
+      success: true,
+      message: 'Blockchain API is working',
+      status: {
+        database: dbStatus,
+        timestamp: new Date().toISOString()
+      }
+    });
   } catch (error) {
     return NextResponse.json({ 
+      success: true,
       message: 'Blockchain API is working (fallback mode)',
-      database: 'Using in-memory storage',
-      totalProducts: blockchainProducts.length,
-      products: blockchainProducts
+      status: {
+        database: 'Fallback mode',
+        timestamp: new Date().toISOString()
+      }
     });
   }
 }
