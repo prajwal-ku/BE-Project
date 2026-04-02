@@ -1,170 +1,129 @@
-import { ethers } from 'ethers';
+import Web3 from 'web3';
+import KrishiSetuABI from '../blockchain/build/contracts/KrishiSetu.json';
 
-// Ganache Configuration
-export const GANACHE_CONFIG = {
-  rpcUrl: 'http://localhost:8545',
-  chainId: 1337,
-  chainName: 'Ganache',
-  symbol: 'ETH',
-};
+const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || '';
 
-// Contract ABI (Simplified for your supply chain)
-export const KRISHI_SETU_ABI = [
-  // Events
-  "event ProductRegistered(uint256 indexed productId, address indexed farmer, string productName, uint256 quantity, uint256 price)",
-  "event ProductPurchased(uint256 indexed productId, address indexed distributor, uint256 quantity, uint256 amount)",
-  "event ProductDelivered(uint256 indexed productId, address indexed retailer)",
-  "event OwnershipTransferred(uint256 indexed productId, address indexed from, address indexed to, string action)",
-  
-  // Farmer Functions
-  "function registerProduct(string memory _name, uint256 _quantity, uint256 _price, string memory _location, string memory _category) external returns (uint256)",
-  "function getFarmerProducts(address _farmer) external view returns (uint256[] memory)",
-  
-  // Distributor Functions
-  "function purchaseProduct(uint256 _productId, uint256 _quantity) external payable",
-  "function getAvailableProducts() external view returns (uint256[] memory)",
-  
-  // Admin/Tracking Functions
-  "function getProductDetails(uint256 _productId) external view returns (string memory, uint256, uint256, address, address, string memory, uint256)",
-  "function getProductHistory(uint256 _productId) external view returns (address[] memory, string[] memory, uint256[] memory)",
-  
-  // Utility Functions
-  "function getProductOwner(uint256 _productId) external view returns (address)",
-  "function getProductStatus(uint256 _productId) external view returns (string memory)",
-  "function getAllProducts() external view returns (uint256[] memory)",
-];
+export interface Product {
+  id: number;
+  name: string;
+  quantity: number;
+  price: number;
+  farmer: string;
+  currentOwner: string;
+  location: string;
+  timestamp: number;
+}
 
-// Contract Address (Update after deployment)
-let contractAddress = '';
+class BlockchainService {
+  private web3: Web3 | null = null;
+  private contract: any = null;
+  private account: string | null = null;
 
-export const setContractAddress = (address: string) => {
-  contractAddress = address;
-  localStorage.setItem('contract_address', address);
-};
-
-export const getContractAddress = () => {
-  return contractAddress || localStorage.getItem('contract_address') || '';
-};
-
-// Get Provider
-export const getProvider = () => {
-  if (typeof window !== 'undefined' && window.ethereum) {
-    return new ethers.providers.Web3Provider(window.ethereum);
-  }
-  return new ethers.providers.JsonRpcProvider(GANACHE_CONFIG.rpcUrl);
-};
-
-// Get Contract Instance
-export const getContract = (withSigner = false) => {
-  const provider = getProvider();
-  const address = getContractAddress();
-  
-  if (!address) {
-    console.warn('⚠️ Contract address not set. Please deploy contract first.');
-    return null;
-  }
-  
-  if (withSigner && window.ethereum) {
-    const signer = provider.getSigner();
-    return new ethers.Contract(address, KRISHI_SETU_ABI, signer);
-  }
-  
-  return new ethers.Contract(address, KRISHI_SETU_ABI, provider);
-};
-
-// Connect Wallet
-export const connectWallet = async () => {
-  if (typeof window !== 'undefined' && window.ethereum) {
+  async init(): Promise<boolean> {
     try {
-      // Request account access
-      const accounts = await window.ethereum.request({
-        method: 'eth_requestAccounts',
-      });
-      
-      // Get network
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const network = await provider.getNetwork();
-      
-      // Check if on Ganache
-      if (network.chainId !== GANACHE_CONFIG.chainId) {
-        await switchToGanache();
+      if (typeof window === 'undefined' || !window.ethereum) {
+        console.warn('MetaMask not available');
+        return false;
       }
+
+      this.web3 = new Web3(window.ethereum);
+      const accounts = await this.web3.eth.requestAccounts();
+      this.account = accounts[0];
+
+      if (CONTRACT_ADDRESS && KrishiSetuABI.abi) {
+        this.contract = new this.web3.eth.Contract(KrishiSetuABI.abi, CONTRACT_ADDRESS);
+        console.log('✅ Blockchain connected:', this.account);
+        return true;
+      }
+      
+      console.warn('⚠️ Contract address not configured');
+      return false;
+    } catch (error) {
+      console.error('Blockchain init error:', error);
+      return false;
+    }
+  }
+
+  async registerProduct(
+    name: string,
+    quantity: number,
+    price: number,
+    location: string,
+    category: string
+  ): Promise<{ success: boolean; productId?: number; error?: string }> {
+    if (!this.contract || !this.account) {
+      return { success: false, error: 'Contract not initialized' };
+    }
+
+    try {
+      const tx = await this.contract.methods
+        .registerProduct(name, quantity, price, location, category)
+        .send({ from: this.account, gas: 500000 });
+
+      const productId = tx.events.ProductRegistered.returnValues.productId;
       
       return {
-        address: accounts[0],
-        network: network.name,
-        chainId: network.chainId
+        success: true,
+        productId: parseInt(productId)
+      };
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async getProduct(productId: number): Promise<Product | null> {
+    if (!this.contract) return null;
+
+    try {
+      const details = await this.contract.methods.getProductDetails(productId).call();
+      return {
+        id: productId,
+        name: details[0],
+        quantity: parseInt(details[1]),
+        price: parseInt(details[2]),
+        farmer: details[3],
+        currentOwner: details[4],
+        location: details[5],
+        timestamp: parseInt(details[6])
       };
     } catch (error) {
-      console.error('🔴 Wallet connection error:', error);
-      throw error;
+      console.error('Get product error:', error);
+      return null;
     }
-  } else {
-    throw new Error('Please install MetaMask or another Web3 wallet');
   }
-};
 
-// Switch to Ganache Network
-export const switchToGanache = async () => {
-  if (typeof window !== 'undefined' && window.ethereum) {
+  async getFarmerProducts(farmerAddress: string): Promise<number[]> {
+    if (!this.contract) return [];
+
     try {
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: `0x${GANACHE_CONFIG.chainId.toString(16)}` }],
-      });
-    } catch (switchError: any) {
-      // If network not added, add it
-      if (switchError.code === 4902) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: `0x${GANACHE_CONFIG.chainId.toString(16)}`,
-            chainName: GANACHE_CONFIG.chainName,
-            rpcUrls: [GANACHE_CONFIG.rpcUrl],
-            nativeCurrency: {
-              name: 'Ethereum',
-              symbol: 'ETH',
-              decimals: 18,
-            },
-          }],
-        });
-      }
+      const products = await this.contract.methods.getFarmerProducts(farmerAddress).call();
+      return products.map((id: any) => parseInt(id));
+    } catch (error) {
+      console.error('Get farmer products error:', error);
+      return [];
     }
   }
-};
 
-// Check if Wallet is Connected
-export const checkWalletConnection = async () => {
-  if (typeof window !== 'undefined' && window.ethereum) {
-    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-    return accounts.length > 0 ? accounts[0] : null;
+  async getAllProducts(): Promise<number[]> {
+    if (!this.contract) return [];
+
+    try {
+      const products = await this.contract.methods.getAllProducts().call();
+      return products.map((id: any) => parseInt(id));
+    } catch (error) {
+      console.error('Get all products error:', error);
+      return [];
+    }
   }
-  return null;
-};
 
-// Helper Functions
-export const formatEther = (wei: ethers.BigNumberish) => {
-  return ethers.utils.formatEther(wei);
-};
+  getAccount(): string | null {
+    return this.account;
+  }
 
-export const parseEther = (eth: string) => {
-  return ethers.utils.parseEther(eth);
-};
+  isInitialized(): boolean {
+    return this.contract !== null;
+  }
+}
 
-// Listen to Events
-export const setupEventListeners = (contract: ethers.Contract, callbacks: any) => {
-  contract.on('ProductRegistered', (productId, farmer, productName, quantity, price, event) => {
-    console.log('📝 Product Registered:', { productId, farmer, productName, quantity, price });
-    callbacks.onProductRegistered?.({ productId, farmer, productName, quantity, price });
-  });
-  
-  contract.on('ProductPurchased', (productId, distributor, quantity, amount, event) => {
-    console.log('🛒 Product Purchased:', { productId, distributor, quantity, amount });
-    callbacks.onProductPurchased?.({ productId, distributor, quantity, amount });
-  });
-  
-  contract.on('OwnershipTransferred', (productId, from, to, action, event) => {
-    console.log('🔄 Ownership Changed:', { productId, from, to, action });
-    callbacks.onOwnershipTransferred?.({ productId, from, to, action });
-  });
-};
+export const blockchainService = new BlockchainService();

@@ -33,11 +33,18 @@ import {
   Crosshair,
   Globe,
   Layers,
-  Loader2
+  Loader2,
+  Wallet,
+  ExternalLink,
+  Copy,
+  ShieldCheck
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import dynamic from "next/dynamic"
+import { MetaMaskConnect } from "@/components/MetaMaskConnect"
+import { blockchainService } from "@/lib/blockchain"
+import Web3 from "web3"
 
 // Dynamically import Leaflet map to avoid SSR issues
 const LocationPickerMap = dynamic(() => import('./LocationPickerMap'), {
@@ -56,7 +63,7 @@ export default function FarmerDashboard() {
   const [activeTab, setActiveTab] = useState("dashboard")
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
-  const [blockchainProducts, setBlockchainProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<any[]>([])
   const [newProduct, setNewProduct] = useState({
     product_name: "",
     category: "",
@@ -80,6 +87,15 @@ export default function FarmerDashboard() {
   const [locationError, setLocationError] = useState<string | null>(null)
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null)
   const [mapCenter, setMapCenter] = useState<[number, number]>([20.5937, 78.9629])
+  
+  // Blockchain states
+  const [walletConnected, setWalletConnected] = useState(false)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  const [blockchainReady, setBlockchainReady] = useState(false)
+  const [verifyingBlockchain, setVerifyingBlockchain] = useState(false)
+  const [selectedProductForBlockchain, setSelectedProductForBlockchain] = useState<any>(null)
+  const [showBlockchainDetails, setShowBlockchainDetails] = useState(false)
+  const [blockchainProductDetails, setBlockchainProductDetails] = useState<any>(null)
   
   const [farmStats, setFarmStats] = useState([
     { 
@@ -144,7 +160,22 @@ export default function FarmerDashboard() {
         }
         setUser(user)
         await loadFarmerProfile(user.id)
-        await loadBlockchainProducts(user.id)
+        await loadProducts(user.id)
+        
+        // Check if user already has wallet address in profile
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('wallet_address')
+          .eq('id', user.id)
+          .single()
+        
+        if (profileData?.wallet_address) {
+          setWalletAddress(profileData.wallet_address)
+          setWalletConnected(true)
+          // Initialize blockchain service
+          await blockchainService.init()
+          setBlockchainReady(true)
+        }
       } catch (error) {
         console.error('🔴 Auth check error:', error)
         router.replace("/auth/login")
@@ -257,7 +288,8 @@ export default function FarmerDashboard() {
         phone: profileForm.phone,
         address: profileForm.address,
         business_name: profileForm.business_name,
-        verified: profile?.verified || false
+        verified: profile?.verified || false,
+        wallet_address: walletAddress // Include wallet address if connected
       }
 
       console.log('🟡 Profile data to update:', profileData)
@@ -296,11 +328,11 @@ export default function FarmerDashboard() {
 
   // Update stats whenever products change
   useEffect(() => {
-    updateFarmStats(blockchainProducts)
-  }, [blockchainProducts])
+    updateFarmStats(products)
+  }, [products])
 
-  // Load products directly from Supabase
-  const loadBlockchainProducts = async (farmerId: string) => {
+  // Load products from Supabase
+  const loadProducts = async (farmerId: string) => {
     if (!farmerId) {
       console.error('🔴 No farmer ID provided for loading products')
       return
@@ -318,24 +350,24 @@ export default function FarmerDashboard() {
 
       if (error) {
         console.error('🔴 Supabase query error:', error)
-        const savedProducts = localStorage.getItem('blockchainProducts')
+        const savedProducts = localStorage.getItem('products')
         if (savedProducts) {
           console.log('🟡 Using localStorage products as fallback')
-          setBlockchainProducts(JSON.parse(savedProducts))
+          setProducts(JSON.parse(savedProducts))
         }
         return
       }
 
       console.log('🟢 Successfully loaded products:', products?.length)
-      setBlockchainProducts(products || [])
-      localStorage.setItem('blockchainProducts', JSON.stringify(products || []))
+      setProducts(products || [])
+      localStorage.setItem('products', JSON.stringify(products || []))
 
     } catch (error) {
       console.error('🔴 Error loading products:', error)
-      const savedProducts = localStorage.getItem('blockchainProducts')
+      const savedProducts = localStorage.getItem('products')
       if (savedProducts) {
         console.log('🟡 Using localStorage products as fallback due to error')
-        setBlockchainProducts(JSON.parse(savedProducts))
+        setProducts(JSON.parse(savedProducts))
       }
     } finally {
       setLoading(false)
@@ -368,23 +400,29 @@ export default function FarmerDashboard() {
 
     setFarmStats([
       { 
-        label: "Blockchain Products", 
+        label: "Total Products", 
         value: totalProducts.toString(), 
-        icon: Shield,
+        icon: Package,
         color: "text-blue-400"
+      },
+      { 
+        label: "Blockchain Verified", 
+        value: products.filter(p => p.blockchain_tx).length.toString(), 
+        icon: Shield,
+        color: "text-green-400"
       },
       { 
         label: "Active Crops", 
         value: activeCrops.toString(), 
         icon: Crop,
-        color: "text-green-400"
+        color: "text-emerald-400"
       },
       { 
         label: "Total Revenue", 
         value: totalRevenue >= 100000 ? `₹${(totalRevenue / 100000).toFixed(1)}L` : 
                totalRevenue >= 1000 ? `₹${(totalRevenue / 1000).toFixed(1)}k` : `₹${totalRevenue}`,
         icon: DollarSign,
-        color: "text-emerald-400"
+        color: "text-yellow-400"
       },
     ])
   }
@@ -482,7 +520,37 @@ export default function FarmerDashboard() {
     setShowLocationPicker(false)
   }
 
-  // Register product with location data
+  // Handle wallet connection
+  const handleWalletConnected = async (account: string) => {
+    setWalletConnected(true)
+    setWalletAddress(account)
+    
+    // Initialize blockchain service
+    const initialized = await blockchainService.init()
+    setBlockchainReady(initialized)
+    
+    // Update profile with wallet address
+    if (user) {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ wallet_address: account })
+          .eq('id', user.id)
+        
+        console.log('✅ Wallet address saved to profile:', account)
+      } catch (error) {
+        console.error('Error saving wallet address:', error)
+      }
+    }
+  }
+
+  const handleWalletDisconnected = () => {
+    setWalletConnected(false)
+    setWalletAddress(null)
+    setBlockchainReady(false)
+  }
+
+  // Register product on blockchain and Supabase
   const registerProductOnBlockchain = async () => {
     if (!isFarmerVerified()) {
       alert("❌ You need to be verified by the admin before registering products.")
@@ -491,6 +559,12 @@ export default function FarmerDashboard() {
 
     if (!newProduct.product_name || !newProduct.quantity || !newProduct.farm_location) {
       alert("Please fill all required fields including product name and farm location")
+      return
+    }
+
+    // Check wallet connection
+    if (!walletConnected || !walletAddress) {
+      alert("❌ Please connect your MetaMask wallet first")
       return
     }
 
@@ -503,20 +577,28 @@ export default function FarmerDashboard() {
         return
       }
 
-      const batchNumber = `BATCH_${Date.now()}`
+      // Register on blockchain
+      const blockchainResult = await blockchainService.registerProduct(
+        newProduct.product_name,
+        newProduct.quantity,
+        newProduct.price_per_quintal,
+        newProduct.farm_location,
+        newProduct.category || 'Other'
+      )
+
+      if (!blockchainResult.success) {
+        throw new Error(blockchainResult.error || 'Blockchain registration failed')
+      }
+
+      console.log('✅ Blockchain registration successful:', blockchainResult)
+
+      // Generate batch number and QR code
+      const batchNumber = `BATCH_${blockchainResult.productId}_${Date.now()}`
       const qrCodeUrl = await generateQRCode(batchNumber)
       setQrCodeData(qrCodeUrl)
       setGeneratedProductId(batchNumber)
 
-      // Create location data object
-      const locationData = {
-        address: newProduct.farm_location,
-        coordinates: newProduct.farm_lat && newProduct.farm_lng ? {
-          lat: newProduct.farm_lat,
-          lng: newProduct.farm_lng
-        } : null
-      }
-
+      // Save to Supabase
       const productData = {
         product_name: newProduct.product_name.trim(),
         category: newProduct.category || 'Other',
@@ -527,18 +609,23 @@ export default function FarmerDashboard() {
           `POINT(${newProduct.farm_lng} ${newProduct.farm_lat})` : null,
         farmer_id: currentUser.id,
         quality_metrics: { 
-          grade: newProduct.quality_grade,
-          location: locationData
+          grade: newProduct.quality_grade
         },
         qr_code_hash: qrCodeUrl,
         batch_number: batchNumber,
         price_per_quintal: Number(newProduct.price_per_quintal) || 0,
         current_owner: 'Farmer',
         status: 'Registered',
-        description: ''
+        description: '',
+        
+        // Blockchain fields
+        blockchain_id: blockchainResult.productId,
+        blockchain_tx: blockchainResult.transactionHash,
+        wallet_address: walletAddress,
+        blockchain_verified: true
       }
 
-      console.log('🔄 Inserting product with location:', productData)
+      console.log('🔄 Inserting product with blockchain data:', productData)
 
       const { data: product, error } = await supabase
         .from('products')
@@ -553,9 +640,12 @@ export default function FarmerDashboard() {
 
       console.log('✅ Product inserted successfully:', product)
 
-      alert(`✅ Product Registered Successfully!\nProduct: ${newProduct.product_name}\nBatch: ${batchNumber}\nLocation: ${newProduct.farm_location}`)
+      alert(`✅ Product Registered Successfully on Blockchain!\n\n` +
+            `Product: ${newProduct.product_name}\n` +
+            `Blockchain ID: ${blockchainResult.productId}\n` +
+            `Transaction: ${blockchainResult.transactionHash?.substring(0, 10)}...`)
       
-      await loadBlockchainProducts(currentUser.id)
+      await loadProducts(currentUser.id)
       
       // Reset form but keep location if needed
       setNewProduct({
@@ -572,15 +662,15 @@ export default function FarmerDashboard() {
       
       setActiveTab("blockchain")
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Registration error:', error)
-      alert("❌ Failed to register product")
+      alert(`❌ Failed to register product: ${error.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  // Track product
+  // Track product on blockchain
   const trackProductOnBlockchain = async () => {
     if (!trackingId.trim()) {
       alert("Please enter a product ID or batch number")
@@ -590,18 +680,21 @@ export default function FarmerDashboard() {
     try {
       setTrackingLoading(true)
       setTrackingResult(null)
+      setBlockchainProductDetails(null)
       
       console.log('🔍 Tracking product:', trackingId)
 
       const cleanTrackingId = trackingId.trim()
       
-      const { data: product, error } = await supabase
+      // First, try to find in Supabase
+      let { data: product, error } = await supabase
         .from('products')
         .select('*')
         .eq('batch_number', cleanTrackingId)
         .single()
 
       if (error) {
+        // Try by ID
         const { data: productById } = await supabase
           .from('products')
           .select('*')
@@ -609,8 +702,9 @@ export default function FarmerDashboard() {
           .single()
 
         if (productById) {
-          setTrackingResult(productById)
+          product = productById
         } else {
+          // Try by name
           const { data: productsByName } = await supabase
             .from('products')
             .select('*')
@@ -618,13 +712,25 @@ export default function FarmerDashboard() {
             .limit(1)
 
           if (productsByName && productsByName.length > 0) {
-            setTrackingResult(productsByName[0])
-          } else {
-            alert(`❌ Product not found: ${trackingId}`)
+            product = productsByName[0]
           }
         }
-      } else {
-        setTrackingResult(product)
+      }
+
+      setTrackingResult(product)
+
+      // If blockchain ID exists, get blockchain data
+      if (product?.blockchain_id && walletConnected && blockchainReady) {
+        try {
+          const blockchainProduct = await blockchainService.getProduct(product.blockchain_id)
+          setBlockchainProductDetails(blockchainProduct)
+        } catch (blockchainError) {
+          console.error('Error fetching blockchain data:', blockchainError)
+        }
+      }
+
+      if (!product) {
+        alert(`❌ Product not found: ${trackingId}`)
       }
 
     } catch (error) {
@@ -632,6 +738,30 @@ export default function FarmerDashboard() {
       alert(`❌ Error tracking product: ${error}`)
     } finally {
       setTrackingLoading(false)
+    }
+  }
+
+  // Verify product on blockchain
+  const verifyProductOnBlockchain = async (product: any) => {
+    if (!walletConnected || !blockchainReady) {
+      alert("Please connect your wallet first")
+      return
+    }
+
+    setVerifyingBlockchain(true)
+    setSelectedProductForBlockchain(product)
+    
+    try {
+      if (product.blockchain_id) {
+        const blockchainProduct = await blockchainService.getProduct(product.blockchain_id)
+        setBlockchainProductDetails(blockchainProduct)
+        setShowBlockchainDetails(true)
+      }
+    } catch (error) {
+      console.error('Error verifying product:', error)
+      alert('Failed to verify product on blockchain')
+    } finally {
+      setVerifyingBlockchain(false)
     }
   }
 
@@ -675,6 +805,12 @@ export default function FarmerDashboard() {
     }
   }
 
+  // Copy transaction hash
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    alert('Copied to clipboard!')
+  }
+
   // Render verification banner
   const renderVerificationBanner = () => {
     if (isFarmerVerified()) {
@@ -715,8 +851,8 @@ export default function FarmerDashboard() {
 
   return (
     <div className="min-h-screen bg-black flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 border-r border-gray-800">
+      {/* Sidebar - same as before */}
+      <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg flex items-center justify-center">
@@ -729,7 +865,7 @@ export default function FarmerDashboard() {
           </div>
         </div>
         
-        <nav className="p-4">
+        <nav className="p-4 flex-1">
           <div className="space-y-2">
             {[
               { id: "dashboard", label: "Dashboard", icon: BarChart3 },
@@ -753,6 +889,27 @@ export default function FarmerDashboard() {
             ))}
           </div>
         </nav>
+
+        {/* MetaMask Connect Button */}
+        <div className="p-4 border-t border-gray-800">
+          <MetaMaskConnect 
+            onConnected={handleWalletConnected}
+            onDisconnected={handleWalletDisconnected}
+            showBalance={true}
+          />
+          
+          {walletConnected && walletAddress && (
+            <div className="mt-3 p-3 bg-green-900/20 border border-green-800 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldCheck className="h-4 w-4 text-green-500" />
+                <span className="text-xs font-medium text-green-400">Blockchain Ready</span>
+              </div>
+              <p className="text-xs text-gray-400 truncate">
+                {walletAddress}
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Profile Section */}
         <div className="p-4 border-t border-gray-800">
@@ -891,12 +1048,20 @@ export default function FarmerDashboard() {
                 <span className="text-xs text-gray-400">Role</span>
                 <span className="text-xs text-white capitalize">{profile.role || 'farmer'}</span>
               </div>
+              {walletAddress && (
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs text-gray-400">Wallet</span>
+                  <span className="text-xs font-mono text-green-400">
+                    {walletAddress.substring(0, 6)}...
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* User Section */}
-        <div className="p-4 border-t border-gray-800 mt-4">
+        <div className="p-4 border-t border-gray-800">
           <div className="flex items-center gap-3 p-3">
             <div className="w-8 h-8 bg-green-600 rounded-full flex items-center justify-center text-white font-medium">
               <User className="h-4 w-4" />
@@ -919,7 +1084,7 @@ export default function FarmerDashboard() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-gray-900 border-b border-gray-800">
           <div className="px-6 py-4">
             <h1 className="text-xl font-bold text-white">
@@ -931,7 +1096,7 @@ export default function FarmerDashboard() {
             </h1>
             <p className="text-sm text-gray-400 mt-1">
               {activeTab === "dashboard" && "Overview of your farming operations"}
-              {activeTab === "blockchain" && "Register products with precise GPS location"}
+              {activeTab === "blockchain" && "Register products with GPS location on blockchain"}
               {activeTab === "orders" && "Manage your product orders"}
               {activeTab === "revenue" && "Track your sales and earnings"}
               {activeTab === "delivery" && "Monitor product deliveries"}
@@ -939,7 +1104,7 @@ export default function FarmerDashboard() {
           </div>
         </header>
 
-        <main className="flex-1 p-6 bg-black">
+        <main className="flex-1 p-6 bg-black overflow-y-auto">
           {loading && (
             <div className="fixed top-0 left-0 w-full h-1 bg-green-500 z-50 animate-pulse"></div>
           )}
@@ -947,10 +1112,25 @@ export default function FarmerDashboard() {
           {/* Verification Banner */}
           {renderVerificationBanner()}
 
+          {/* Wallet Connection Warning */}
+          {!walletConnected && activeTab === "blockchain" && (
+            <div className="mb-6 p-4 bg-orange-900/30 border border-orange-800 rounded-lg">
+              <div className="flex items-center gap-3">
+                <Wallet className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                <div>
+                  <p className="text-orange-400 font-medium">Connect MetaMask to use blockchain features</p>
+                  <p className="text-sm text-orange-300/70">
+                    You need to connect your wallet to register products on the blockchain.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === "dashboard" && (
             <div className="space-y-6">
               {/* Farm Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {farmStats.map((stat, index) => (
                   <div key={index} className="bg-gray-900 rounded-lg border border-gray-800 p-6 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -1015,9 +1195,9 @@ export default function FarmerDashboard() {
                 </div>
               </div>
 
-              {/* Recent Blockchain Products */}
+              {/* Recent Products */}
               <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Recent Blockchain Products</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">Recent Products</h3>
                 {loading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
@@ -1025,21 +1205,28 @@ export default function FarmerDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {blockchainProducts.slice(0, 5).map((product, index) => {
+                    {products.slice(0, 5).map((product, index) => {
                       const qualityGrade = getQualityGrade(product)
                       return (
                         <div key={index} className="flex justify-between items-center p-3 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
                           <div className="flex-1">
                             <div className="flex justify-between items-start">
                               <div>
-                                <p className="font-medium text-white">{product.product_name}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-white">{product.product_name}</p>
+                                  {product.blockchain_verified && (
+                                    <span className="text-xs bg-green-900 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                      <Shield className="h-3 w-3" />
+                                      Blockchain
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-sm text-gray-400">
                                   {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
                                 </p>
                                 <p className="text-xs text-gray-500 flex items-center gap-1">
                                   <MapPin className="h-3 w-3" />
                                   {product.farm_location}
-                                  {product.farm_coordinates && " (GPS verified)"}
                                 </p>
                                 {product.harvest_date && (
                                   <p className="text-xs text-gray-500">
@@ -1070,6 +1257,14 @@ export default function FarmerDashboard() {
                                 }`}>
                                   Quality: {qualityGrade}
                                 </span>
+                                {product.blockchain_id && (
+                                  <button
+                                    onClick={() => verifyProductOnBlockchain(product)}
+                                    className="text-xs bg-blue-900 text-blue-400 px-2 py-1 rounded-full hover:bg-blue-800 transition-colors"
+                                  >
+                                    Verify on Blockchain
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -1077,9 +1272,9 @@ export default function FarmerDashboard() {
                       )
                     })}
                     
-                    {blockchainProducts.length === 0 && (
-                      <div className="text-center py-4 text-gray-500">
-                        <Shield className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    {products.length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-gray-400">No products registered yet.</p>
                         <p className="text-sm text-gray-500">Register your first product to get started!</p>
                       </div>
@@ -1096,7 +1291,7 @@ export default function FarmerDashboard() {
               <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <Plus className="h-5 w-5 text-green-500" />
-                  Register New Product with GPS Location
+                  Register New Product on Blockchain
                 </h3>
                 
                 {!isFarmerVerified() && (
@@ -1107,6 +1302,20 @@ export default function FarmerDashboard() {
                         <p className="text-yellow-400 font-medium">Verification Required</p>
                         <p className="text-sm text-yellow-300/70">
                           You need to be verified by the admin before you can register products.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {!walletConnected && isFarmerVerified() && (
+                  <div className="mb-6 p-4 bg-orange-900/20 border border-orange-800 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <Wallet className="h-5 w-5 text-orange-500 flex-shrink-0" />
+                      <div>
+                        <p className="text-orange-400 font-medium">Connect Wallet First</p>
+                        <p className="text-sm text-orange-300/70">
+                          Please connect your MetaMask wallet from the sidebar to register on blockchain.
                         </p>
                       </div>
                     </div>
@@ -1185,7 +1394,7 @@ export default function FarmerDashboard() {
                     </select>
                   </div>
                   
-                  {/* Location Section - Enhanced with GPS */}
+                  {/* Location Section */}
                   <div className="md:col-span-2">
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-sm font-medium text-white">Farm Location *</label>
@@ -1287,27 +1496,31 @@ export default function FarmerDashboard() {
                 <Button 
                   onClick={registerProductOnBlockchain}
                   className={`w-full ${
-                    isFarmerVerified() 
+                    isFarmerVerified() && walletConnected
                       ? 'bg-green-600 hover:bg-green-700' 
                       : 'bg-gray-600 cursor-not-allowed'
                   } text-white`}
-                  disabled={loading || !isFarmerVerified() || !newProduct.farm_location.trim() || !newProduct.product_name.trim()}
-                  title={!isFarmerVerified() ? "Verification required to register products" : ""}
+                  disabled={loading || !isFarmerVerified() || !walletConnected || !newProduct.farm_location.trim() || !newProduct.product_name.trim()}
                 >
                   {loading ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Registering Product...
+                      Registering on Blockchain...
                     </>
                   ) : !isFarmerVerified() ? (
                     <>
                       <AlertCircle className="h-4 w-4 mr-2" />
                       Verification Required
                     </>
+                  ) : !walletConnected ? (
+                    <>
+                      <Wallet className="h-4 w-4 mr-2" />
+                      Connect Wallet First
+                    </>
                   ) : (
                     <>
                       <Shield className="h-4 w-4 mr-2" />
-                      Register Product with GPS Location
+                      Register on Blockchain with GPS
                     </>
                   )}
                 </Button>
@@ -1316,7 +1529,7 @@ export default function FarmerDashboard() {
                   <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
                     <h4 className="font-semibold text-white mb-3 flex items-center gap-2">
                       <QrCode className="h-5 w-5 text-green-500" />
-                      Generated QR Code with Location Data
+                      Blockchain Product QR Code
                     </h4>
                     <div className="flex flex-col md:flex-row items-center gap-4">
                       <div className="bg-white p-2 rounded-lg">
@@ -1352,7 +1565,7 @@ export default function FarmerDashboard() {
                           <strong>Price:</strong> ₹{newProduct.price_per_quintal}/quintal
                         </p>
                         <p className="text-sm text-gray-400 mb-4">
-                          Scan this QR code to track this product's journey and verify its origin.
+                          This QR code contains the blockchain product ID. Scan to verify authenticity.
                         </p>
                         <Button 
                           onClick={downloadQRCode}
@@ -1406,31 +1619,39 @@ export default function FarmerDashboard() {
                   </Button>
                 </div>
 
-                {blockchainProducts.length > 0 && (
+                {products.length > 0 && (
                   <div className="mb-4">
                     <p className="text-sm text-gray-400 mb-2">Quick search from your products:</p>
                     <div className="flex flex-wrap gap-2">
-                      {blockchainProducts.slice(0, 5).map((product) => (
+                      {products.slice(0, 5).map((product) => (
                         <button
                           key={product.id}
                           onClick={() => {
                             setTrackingId(product.batch_number || product.id);
                             trackProductOnBlockchain();
                           }}
-                          className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded-full border border-gray-700 transition-colors"
+                          className="text-xs bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded-full border border-gray-700 transition-colors flex items-center gap-1"
                           title={`Click to track: ${product.product_name}`}
                         >
-                          {product.product_name} ({product.batch_number ? product.batch_number.slice(0, 8) : product.id.slice(0, 8)}...)
+                          {product.product_name}
+                          {product.blockchain_verified && (
+                            <Shield className="h-3 w-3 text-green-500" />
+                          )}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
                 
+                {/* Tracking Results */}
                 {trackingResult && (
                   <div className="mt-6 space-y-6">
+                    {/* Database Product Info */}
                     <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
-                      <h4 className="font-semibold text-white mb-4">Product Details</h4>
+                      <h4 className="font-semibold text-white mb-4 flex items-center gap-2">
+                        <Package className="h-4 w-4 text-green-500" />
+                        Product Details
+                      </h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <p className="text-sm text-gray-400">Product Name</p>
@@ -1457,47 +1678,76 @@ export default function FarmerDashboard() {
                           <p className="text-white font-medium">{trackingResult.current_owner || 'Farmer'}</p>
                         </div>
                         <div>
-                          <p className="text-sm text-gray-400">Status</p>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            trackingResult.status === 'Registered' ? 'bg-green-900 text-green-400' :
-                            'bg-yellow-900 text-yellow-400'
-                          }`}>
-                            {trackingResult.status || 'Registered'}
-                          </span>
-                        </div>
-                        <div>
                           <p className="text-sm text-gray-400">Price</p>
                           <p className="text-white font-medium">₹{trackingResult.price_per_quintal}/quintal</p>
                         </div>
-                        {trackingResult.harvest_date && (
-                          <div>
-                            <p className="text-sm text-gray-400">Harvest Date</p>
-                            <p className="text-white font-medium">{formatDate(trackingResult.harvest_date)}</p>
+                      </div>
+                      
+                      {trackingResult.blockchain_verified && (
+                        <div className="mt-4 p-3 bg-green-900/20 border border-green-800 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <Shield className="h-4 w-4 text-green-500" />
+                            <span className="text-sm text-green-400">Blockchain Verified</span>
                           </div>
-                        )}
-                        <div>
-                          <p className="text-sm text-gray-400">Quality Grade</p>
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            getQualityGrade(trackingResult) === 'A' ? 'bg-green-900 text-green-400' :
-                            getQualityGrade(trackingResult) === 'B' ? 'bg-blue-900 text-blue-400' :
-                            getQualityGrade(trackingResult) === 'C' ? 'bg-yellow-900 text-yellow-400' :
-                            getQualityGrade(trackingResult) === 'D' ? 'bg-orange-900 text-orange-400' :
-                            'bg-purple-900 text-purple-400'
-                          }`}>
-                            {getQualityGrade(trackingResult)}
-                          </span>
+                          <p className="text-xs text-gray-400 mt-1">
+                            Blockchain ID: {trackingResult.blockchain_id}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            TX: {trackingResult.blockchain_tx?.substring(0, 20)}...
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Blockchain Product Info */}
+                    {blockchainProductDetails && (
+                      <div className="p-4 bg-gray-800 rounded-lg border border-green-700">
+                        <h4 className="font-semibold text-white mb-4 flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-green-500" />
+                          Blockchain Verified Data
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-sm text-gray-400">Blockchain Product ID</p>
+                            <p className="text-white font-medium">#{blockchainProductDetails.id}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-400">Farmer Address</p>
+                            <p className="text-white font-mono text-xs">
+                              {blockchainProductDetails.farmer?.substring(0, 10)}...
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-400">Current Owner</p>
+                            <p className="text-white font-mono text-xs">
+                              {blockchainProductDetails.currentOwner?.substring(0, 10)}...
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-400">Quantity</p>
+                            <p className="text-white">{blockchainProductDetails.quantity} quintals</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-400">Price</p>
+                            <p className="text-white">₹{blockchainProductDetails.price}/quintal</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-400">Location</p>
+                            <p className="text-white">{blockchainProductDetails.location}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Products List with Location Indicators */}
+              {/* Products List */}
               <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <History className="h-5 w-5 text-green-500" />
-                  My Products ({blockchainProducts.length})
+                  My Products ({products.length})
                 </h3>
                 {loading ? (
                   <div className="text-center py-8">
@@ -1505,75 +1755,94 @@ export default function FarmerDashboard() {
                     <p className="text-gray-400 mt-2">Loading products...</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {blockchainProducts.map((product, index) => {
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {products.map((product, index) => {
                       const qualityGrade = getQualityGrade(product)
-                      const hasGPS = product.farm_coordinates || 
-                        (product.quality_metrics && 
-                         typeof product.quality_metrics === 'object' && 
-                         product.quality_metrics.location?.coordinates)
-                      
                       return (
-                        <div key={index} className="flex justify-between items-center p-4 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
-                          <div className="flex-1">
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <p className="font-medium text-white flex items-center gap-2">
-                                  {product.product_name}
-                                  {hasGPS && (
-                                    <span className="text-xs bg-blue-900 text-blue-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                      <MapPin className="h-3 w-3" />
-                                      GPS Verified
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-sm text-gray-400">
-                                  {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
-                                </p>
-                                <p className="text-xs text-gray-500 flex items-center gap-1">
-                                  <MapPin className="h-3 w-3" />
-                                  {product.farm_location}
-                                  {product.batch_number && ` • Batch: ${product.batch_number}`}
-                                </p>
-                                {product.harvest_date && (
-                                  <p className="text-xs text-gray-500">
-                                    Harvest: {formatDate(product.harvest_date)}
-                                  </p>
+                        <div key={index} className="p-4 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-medium text-white">{product.product_name}</p>
+                                {product.blockchain_verified ? (
+                                  <span className="text-xs bg-green-900 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Shield className="h-3 w-3" />
+                                    Blockchain
+                                  </span>
+                                ) : (
+                                  <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">
+                                    Database Only
+                                  </span>
                                 )}
-                                
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {qualityGrade && (
-                                    <span className={`text-xs px-2 py-1 rounded-full ${
-                                      qualityGrade === 'A' ? 'bg-green-900 text-green-400' :
-                                      qualityGrade === 'B' ? 'bg-blue-900 text-blue-400' :
-                                      qualityGrade === 'C' ? 'bg-yellow-900 text-yellow-400' :
-                                      qualityGrade === 'D' ? 'bg-orange-900 text-orange-400' :
-                                      'bg-purple-900 text-purple-400'
-                                    }`}>
-                                      Quality: {qualityGrade}
-                                    </span>
-                                  )}
+                              </div>
+                              <p className="text-sm text-gray-400">
+                                {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
+                              </p>
+                              <p className="text-xs text-gray-500 flex items-center gap-1">
+                                <MapPin className="h-3 w-3" />
+                                {product.farm_location}
+                                {product.batch_number && ` • Batch: ${product.batch_number}`}
+                              </p>
+                              
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {qualityGrade && (
+                                  <span className={`text-xs px-2 py-1 rounded-full ${
+                                    qualityGrade === 'A' ? 'bg-green-900 text-green-400' :
+                                    qualityGrade === 'B' ? 'bg-blue-900 text-blue-400' :
+                                    qualityGrade === 'C' ? 'bg-yellow-900 text-yellow-400' :
+                                    qualityGrade === 'D' ? 'bg-orange-900 text-orange-400' :
+                                    'bg-purple-900 text-purple-400'
+                                  }`}>
+                                    Quality: {qualityGrade}
+                                  </span>
+                                )}
+                                {product.blockchain_id && (
+                                  <button
+                                    onClick={() => verifyProductOnBlockchain(product)}
+                                    disabled={verifyingBlockchain}
+                                    className="text-xs bg-green-900 text-green-400 px-2 py-1 rounded-full hover:bg-green-800 transition-colors flex items-center gap-1"
+                                  >
+                                    {verifyingBlockchain && selectedProductForBlockchain?.id === product.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Shield className="h-3 w-3" />
+                                    )}
+                                    Verify
+                                  </button>
+                                )}
+                              </div>
+
+                              {product.blockchain_tx && (
+                                <div className="mt-2 text-xs">
+                                  <p className="text-gray-500">
+                                    TX: {product.blockchain_tx.substring(0, 20)}...
+                                    <button 
+                                      onClick={() => copyToClipboard(product.blockchain_tx)}
+                                      className="ml-2 text-blue-400 hover:text-blue-300"
+                                    >
+                                      <Copy className="h-3 w-3 inline" />
+                                    </button>
+                                  </p>
                                 </div>
-                              </div>
-                              <div className="text-right ml-4">
-                                <p className="text-sm text-white font-semibold">
-                                  Total: ₹{(product.quantity * product.price_per_quintal).toLocaleString()}
-                                </p>
-                                <span className={`text-xs px-2 py-1 rounded-full ${
-                                  product.status === 'Registered' ? 'bg-green-900 text-green-400' :
-                                  'bg-yellow-900 text-yellow-400'
-                                }`}>
-                                  {product.status || 'Registered'}
-                                </span>
-                                <p className="text-xs text-gray-500 mt-1">{product.current_owner || 'Farmer'}</p>
-                              </div>
+                              )}
+                            </div>
+                            <div className="text-right ml-4">
+                              <p className="text-sm text-white font-semibold">
+                                ₹{(product.quantity * product.price_per_quintal).toLocaleString()}
+                              </p>
+                              <span className={`text-xs px-2 py-1 rounded-full ${
+                                product.status === 'Registered' ? 'bg-green-900 text-green-400' :
+                                'bg-yellow-900 text-yellow-400'
+                              }`}>
+                                {product.status || 'Registered'}
+                              </span>
                             </div>
                           </div>
                         </div>
                       )
                     })}
                     
-                    {blockchainProducts.length === 0 && (
+                    {products.length === 0 && (
                       <div className="text-center py-8 text-gray-500">
                         <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
                         <p className="text-gray-400">No products registered yet.</p>
@@ -1586,30 +1855,13 @@ export default function FarmerDashboard() {
             </div>
           )}
 
-          {/* Other tabs */}
+          {/* Other tabs - Orders, Revenue, Delivery (simplified) */}
           {activeTab === "orders" && (
             <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
               <div className="text-center py-8">
                 <Package className="h-16 w-16 text-green-500 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-white mb-4">Orders Management</h2>
-                <p className="text-gray-400 mb-6 max-w-2xl mx-auto">
-                  View and manage all your product orders, track order status, 
-                  and process new orders from distributors and retailers.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
-                  <div className="p-4 bg-gray-800 rounded-lg text-center border border-gray-700">
-                    <p className="text-2xl font-bold text-white">12</p>
-                    <p className="text-sm text-gray-400">Pending Orders</p>
-                  </div>
-                  <div className="p-4 bg-gray-800 rounded-lg text-center border border-gray-700">
-                    <p className="text-2xl font-bold text-white">8</p>
-                    <p className="text-sm text-gray-400">Completed Today</p>
-                  </div>
-                  <div className="p-4 bg-gray-800 rounded-lg text-center border border-gray-700">
-                    <p className="text-2xl font-bold text-white">₹45K</p>
-                    <p className="text-sm text-gray-400">Today's Revenue</p>
-                  </div>
-                </div>
+                <p className="text-gray-400">Orders feature coming soon...</p>
               </div>
             </div>
           )}
@@ -1619,22 +1871,7 @@ export default function FarmerDashboard() {
               <div className="text-center py-8">
                 <DollarSign className="h-16 w-16 text-green-500 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-white mb-4">Revenue & Sales</h2>
-                <p className="text-gray-400 mb-6 max-w-2xl mx-auto">
-                  Track your sales performance, analyze revenue patterns, 
-                  and monitor your business growth.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8 max-w-2xl mx-auto">
-                  <div className="p-6 bg-gray-800 rounded-lg border border-gray-700">
-                    <h3 className="text-lg font-semibold text-white mb-2">This Month</h3>
-                    <p className="text-3xl font-bold text-green-500">₹85,000</p>
-                    <p className="text-sm text-gray-400">+18% from last month</p>
-                  </div>
-                  <div className="p-6 bg-gray-800 rounded-lg border border-gray-700">
-                    <h3 className="text-lg font-semibold text-white mb-2">Total Revenue</h3>
-                    <p className="text-3xl font-bold text-green-500">₹4.2L</p>
-                    <p className="text-sm text-gray-400">Year to date</p>
-                  </div>
-                </div>
+                <p className="text-gray-400">Revenue tracking coming soon...</p>
               </div>
             </div>
           )}
@@ -1644,18 +1881,78 @@ export default function FarmerDashboard() {
               <div className="text-center py-8">
                 <Truck className="h-16 w-16 text-green-500 mx-auto mb-4" />
                 <h2 className="text-2xl font-bold text-white mb-4">Delivery Tracking</h2>
-                <p className="text-gray-400 mb-6 max-w-2xl mx-auto">
-                  Monitor your product deliveries in real-time, track shipment status, 
-                  and ensure timely delivery to your customers.
-                </p>
-                <Button className="bg-green-600 hover:bg-green-700 text-white">
-                  Track All Deliveries
-                </Button>
+                <p className="text-gray-400">Delivery tracking coming soon...</p>
               </div>
             </div>
           )}
         </main>
       </div>
+
+      {/* Blockchain Details Modal */}
+      {showBlockchainDetails && blockchainProductDetails && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-lg border border-gray-800 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Shield className="h-5 w-5 text-green-500" />
+                Blockchain Verification Details
+              </h3>
+              <button
+                onClick={() => setShowBlockchainDetails(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Product ID</p>
+                  <p className="text-white font-mono text-sm">#{blockchainProductDetails.id}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Product Name</p>
+                  <p className="text-white">{blockchainProductDetails.name}</p>
+                </div>
+                <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Farmer Address</p>
+                  <p className="text-white font-mono text-sm break-all">{blockchainProductDetails.farmer}</p>
+                </div>
+                <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Current Owner</p>
+                  <p className="text-white font-mono text-sm break-all">{blockchainProductDetails.currentOwner}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Quantity</p>
+                  <p className="text-white">{blockchainProductDetails.quantity} quintals</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Price</p>
+                  <p className="text-white">₹{blockchainProductDetails.price}/quintal</p>
+                </div>
+                <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Location</p>
+                  <p className="text-white">{blockchainProductDetails.location}</p>
+                </div>
+                <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Registration Date</p>
+                  <p className="text-white">{new Date(blockchainProductDetails.timestamp * 1000).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => setShowBlockchainDetails(false)}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

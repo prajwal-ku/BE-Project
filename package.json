@@ -9,9 +9,14 @@
     "start": "next start",
     "chaincode:build": "cd blockchain/chaincode && go build",
     "chaincode:test": "cd blockchain/chaincode && go test",
-    "deploy": "truffle migrate --network ganache",
-    "deploy:reset": "truffle migrate --reset --network ganache",
-    "test:contract": "truffle test --network ganache"
+    "blockchain:compile": "cd blockchain && npx truffle compile",
+    "blockchain:migrate": "cd blockchain && npx truffle migrate --network ganache",
+    "blockchain:migrate:reset": "cd blockchain && npx truffle migrate --reset --network ganache",
+    "blockchain:console": "cd blockchain && npx truffle console --network ganache",
+    "blockchain:test": "cd blockchain && npx truffle test --network ganache",
+    "deploy": "npm run blockchain:compile && npm run blockchain:migrate",
+    "deploy:reset": "npm run blockchain:compile && npm run blockchain:migrate:reset",
+    "test:contract": "npm run blockchain:test"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.0",
@@ -75,6 +80,7 @@
     "react-qr-code": "^2.0.18",
     "react-resizable-panels": "^2.1.7",
     "recharts": "2.15.4",
+    "solc": "^0.8.34",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
@@ -92,6 +98,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^9.0.0",
+    "@types/web3": "^1.0.20",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "truffle": "^5.11.5",

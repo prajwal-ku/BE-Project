@@ -16,22 +16,18 @@ async function deploy() {
     console.log('🚀 Deploying to Ganache...');
     console.log('📍 RPC URL:', GANACHE_URL);
     
-    // Initialize Web3 (using .default for v4)
     const web3 = new Web3(GANACHE_URL);
     
     try {
-        // Check connection
         const chainId = await web3.eth.getChainId();
         console.log('✅ Connected to chain ID:', chainId);
         
-        // Get accounts
         const accounts = await web3.eth.getAccounts();
         console.log('📝 Deploying from:', accounts[0]);
         
         const balance = await web3.eth.getBalance(accounts[0]);
         console.log('💰 Balance:', web3.utils.fromWei(balance, 'ether'), 'ETH');
         
-        // Get the bytecode - make sure it has 0x prefix
         let bytecode = contractArtifact.bytecode;
         if (!bytecode.startsWith('0x')) {
             bytecode = '0x' + bytecode;
@@ -39,26 +35,21 @@ async function deploy() {
         
         console.log('📦 Bytecode length:', bytecode.length / 2, 'bytes');
         
-        // Create contract instance
         const contract = new web3.eth.Contract(contractArtifact.abi);
         
-        // Prepare deployment
         const deployTx = contract.deploy({
             data: bytecode
         });
         
-        // Estimate gas
         const gasEstimate = await deployTx.estimateGas({
             from: accounts[0]
         });
         console.log('🔧 Estimated gas:', gasEstimate);
         
-        // Get gas price
         const gasPrice = await web3.eth.getGasPrice();
         console.log('💰 Gas price:', web3.utils.fromWei(gasPrice, 'gwei'), 'Gwei');
         
-        // Deploy
-        console.log('⏳ Deploying contract... This may take a few seconds.');
+        console.log('⏳ Deploying contract...');
         
         const deployedContract = await deployTx.send({
             from: accounts[0],
@@ -70,7 +61,6 @@ async function deploy() {
         console.log('📄 Contract address:', deployedContract.options.address);
         console.log('🔗 Transaction hash:', deployedContract.transactionHash);
         
-        // Save config to root directory
         const configPath = path.join(__dirname, '..', 'contract-config.json');
         const config = {
             contractAddress: deployedContract.options.address,
@@ -85,13 +75,11 @@ async function deploy() {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         console.log('💾 Config saved to:', configPath);
         
-        // Update .env.local
         const envPath = path.join(__dirname, '..', '.env.local');
         let envContent = '';
         
         if (fs.existsSync(envPath)) {
             envContent = fs.readFileSync(envPath, 'utf8');
-            // Remove existing contract address
             const lines = envContent.split('\n');
             const filteredLines = lines.filter(line => !line.startsWith('NEXT_PUBLIC_CONTRACT_ADDRESS='));
             envContent = filteredLines.join('\n');
@@ -100,26 +88,14 @@ async function deploy() {
         envContent = `NEXT_PUBLIC_CONTRACT_ADDRESS=${deployedContract.options.address}\n${envContent}`;
         fs.writeFileSync(envPath, envContent);
         
-        console.log('💾 .env.local updated with contract address');
+        console.log('💾 .env.local updated');
         console.log('\n🎉 Deployment complete!');
         console.log('\n📋 Contract Address:', deployedContract.options.address);
-        console.log('\n📋 Next steps:');
-        console.log('1. Copy this address: ' + deployedContract.options.address);
-        console.log('2. Make sure MetaMask is connected to Ganache (Chain ID: 1337)');
-        console.log('3. Import this account to MetaMask:', accounts[0]);
-        console.log('4. Restart your Next.js app: npm run dev');
         
         return deployedContract.options.address;
         
     } catch (error) {
         console.error('\n❌ Deployment failed:', error.message);
-        if (error.message.includes('Couldn\'t decode')) {
-            console.log('\nThis might be an ABI encoding issue.');
-        }
-        console.log('\nTroubleshooting:');
-        console.log('1. Make sure Ganache is running on port 7545');
-        console.log('2. Try restarting Ganache');
-        console.log('3. Check if contract compiled without errors');
         process.exit(1);
     }
 }

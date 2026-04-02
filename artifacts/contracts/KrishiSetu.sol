@@ -1,7 +1,9 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity 0.5.0;
 
 contract KrishiSetu {
+    uint256 public productCounter;
+    
+    // Product structure
     struct Product {
         string name;
         uint256 quantity;
@@ -14,27 +16,31 @@ contract KrishiSetu {
         bool isAvailable;
     }
     
+    // Product history structure
+    struct ProductHistory {
+        address[] owners;
+        string[] actions;
+        uint256[] timestamps;
+    }
+    
+    // Mappings
     mapping(uint256 => Product) public products;
     mapping(address => uint256[]) public farmerProducts;
-    mapping(uint256 => address[]) public productHistory;
-    mapping(uint256 => string[]) public productActions;
-    mapping(uint256 => uint256[]) public productTimestamps;
+    mapping(uint256 => ProductHistory) public productHistory;
     
-    uint256 public productCounter;
-    
+    // Events
     event ProductRegistered(uint256 indexed productId, address indexed farmer, string productName, uint256 quantity, uint256 price);
     event ProductPurchased(uint256 indexed productId, address indexed distributor, uint256 quantity, uint256 amount);
-    event ProductDelivered(uint256 indexed productId, address indexed retailer);
     event OwnershipTransferred(uint256 indexed productId, address indexed from, address indexed to, string action);
     
-    // Farmer: Register product
+    // Register a new product
     function registerProduct(
         string memory _name,
         uint256 _quantity,
         uint256 _price,
         string memory _location,
         string memory _category
-    ) external returns (uint256) {
+    ) public returns (uint256) {
         productCounter++;
         
         products[productCounter] = Product({
@@ -45,16 +51,17 @@ contract KrishiSetu {
             currentOwner: msg.sender,
             location: _location,
             category: _category,
-            timestamp: block.timestamp,
+            timestamp: now,
             isAvailable: true
         });
         
         farmerProducts[msg.sender].push(productCounter);
         
-        // Add to history
-        productHistory[productCounter].push(msg.sender);
-        productActions[productCounter].push("Registered by Farmer");
-        productTimestamps[productCounter].push(block.timestamp);
+        // Initialize history
+        ProductHistory storage history = productHistory[productCounter];
+        history.owners.push(msg.sender);
+        history.actions.push("Registered by Farmer");
+        history.timestamps.push(now);
         
         emit ProductRegistered(productCounter, msg.sender, _name, _quantity, _price);
         emit OwnershipTransferred(productCounter, address(0), msg.sender, "Registered");
@@ -62,15 +69,16 @@ contract KrishiSetu {
         return productCounter;
     }
     
-    // Distributor: Purchase product
-    function purchaseProduct(uint256 _productId, uint256 _quantity) external payable {
+    // Purchase a product
+    function purchaseProduct(uint256 _productId, uint256 _quantity) public payable {
         Product storage product = products[_productId];
         require(product.isAvailable, "Product not available");
         require(product.quantity >= _quantity, "Insufficient quantity");
         require(msg.value >= product.price * _quantity, "Insufficient payment");
         
         // Transfer payment to farmer
-        payable(product.farmer).transfer(msg.value);
+        address payable farmer = address(uint160(product.farmer));
+        farmer.transfer(msg.value);
         
         // Update product
         product.quantity -= _quantity;
@@ -79,17 +87,18 @@ contract KrishiSetu {
             product.isAvailable = false;
         }
         
-        // Add to history
-        productHistory[_productId].push(msg.sender);
-        productActions[_productId].push("Purchased by Distributor");
-        productTimestamps[_productId].push(block.timestamp);
+        // Update history
+        ProductHistory storage history = productHistory[_productId];
+        history.owners.push(msg.sender);
+        history.actions.push("Purchased by Distributor");
+        history.timestamps.push(now);
         
         emit ProductPurchased(_productId, msg.sender, _quantity, msg.value);
         emit OwnershipTransferred(_productId, product.farmer, msg.sender, "Purchased");
     }
     
-    // View functions
-    function getAvailableProducts() external view returns (uint256[] memory) {
+    // Get all available products
+    function getAvailableProducts() public view returns (uint256[] memory) {
         uint256[] memory available = new uint256[](productCounter);
         uint256 count = 0;
         
@@ -109,11 +118,13 @@ contract KrishiSetu {
         return result;
     }
     
-    function getFarmerProducts(address _farmer) external view returns (uint256[] memory) {
+    // Get products by farmer
+    function getFarmerProducts(address _farmer) public view returns (uint256[] memory) {
         return farmerProducts[_farmer];
     }
     
-    function getProductDetails(uint256 _productId) external view returns (
+    // Get product details
+    function getProductDetails(uint256 _productId) public view returns (
         string memory,
         uint256,
         uint256,
@@ -134,23 +145,36 @@ contract KrishiSetu {
         );
     }
     
-    function getProductHistory(uint256 _productId) external view returns (
+    // Get product history
+    function getProductHistory(uint256 _productId) public view returns (
         address[] memory,
         string[] memory,
         uint256[] memory
     ) {
+        ProductHistory storage history = productHistory[_productId];
         return (
-            productHistory[_productId],
-            productActions[_productId],
-            productTimestamps[_productId]
+            history.owners,
+            history.actions,
+            history.timestamps
         );
     }
     
-    function getAllProducts() external view returns (uint256[] memory) {
+    // Get all products
+    function getAllProducts() public view returns (uint256[] memory) {
         uint256[] memory allProducts = new uint256[](productCounter);
         for (uint256 i = 1; i <= productCounter; i++) {
             allProducts[i-1] = i;
         }
         return allProducts;
+    }
+    
+    // Get product owner
+    function getProductOwner(uint256 _productId) public view returns (address) {
+        return products[_productId].currentOwner;
+    }
+    
+    // Check if product is available
+    function isProductAvailable(uint256 _productId) public view returns (bool) {
+        return products[_productId].isAvailable;
     }
 }
