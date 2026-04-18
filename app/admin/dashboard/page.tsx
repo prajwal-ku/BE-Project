@@ -29,7 +29,13 @@ import {
   Search,
   AlertCircle,
   UserCheck,
-  UserX
+  UserX,
+  Copy,
+  ExternalLink,
+  Clock,
+  History,
+  Wallet,
+  QrCode
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
@@ -43,6 +49,7 @@ interface UserProfile {
   business_name: string | null
   verified: boolean
   created_at: string
+  wallet_address?: string | null
 }
 
 interface Product {
@@ -57,20 +64,28 @@ interface Product {
   current_owner: string
   created_at: string
   harvest_date: string | null
+  blockchain_id?: string
+  blockchain_status?: string
+  blockchain_tx?: string
   farmer?: UserProfile
+  sold_at?: string
 }
 
-interface Order {
+interface Transaction {
   id: string
   product_id: string
   farmer_id: string
   distributor_id: string | null
+  retailer_id: string | null
   quantity: number
-  price: number
+  price_per_quintal: number
+  total_amount: number
   status: string
-  created_at: string
+  transaction_hash: string | null
+  purchased_at: string
   product?: Product
   farmer?: UserProfile
+  buyer?: UserProfile
 }
 
 export default function AdminDashboard() {
@@ -81,19 +96,20 @@ export default function AdminDashboard() {
   const [distributors, setDistributors] = useState<UserProfile[]>([])
   const [retailers, setRetailers] = useState<UserProfile[]>([])
   const [products, setProducts] = useState<Product[]>([])
-  const [orders, setOrders] = useState<Order[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [farmerProducts, setFarmerProducts] = useState<{[key: string]: Product[]}>({})
-  const [distributorPurchases, setDistributorPurchases] = useState<{[key: string]: any[]}>({})
+  const [farmerSales, setFarmerSales] = useState<{[key: string]: Transaction[]}>({})
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [stats, setStats] = useState({
     totalFarmers: 0,
     totalDistributors: 0,
     totalRetailers: 0,
     totalProducts: 0,
+    soldProducts: 0,
     activeOrders: 0,
     totalRevenue: 0,
     pendingVerifications: 0,
-    pendingDistributorVerifications: 0, // NEW: Pending distributor verifications
+    pendingDistributorVerifications: 0,
     previousFarmers: 0,
     previousProducts: 0,
     previousOrders: 0
@@ -103,11 +119,13 @@ export default function AdminDashboard() {
   const [filterVerified, setFilterVerified] = useState("all")
   const [distributorSearchQuery, setDistributorSearchQuery] = useState("")
   const [distributorFilterVerified, setDistributorFilterVerified] = useState("all")
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
+  const [showTransactionDetails, setShowTransactionDetails] = useState(false)
   
   const router = useRouter()
   const supabase = createClient()
 
-  // Check authentication and prevent back navigation
+  // Check authentication
   useEffect(() => {
     let isMounted = true
 
@@ -127,7 +145,6 @@ export default function AdminDashboard() {
           .single()
 
         if (error || !profile) {
-          // Create admin profile if doesn't exist
           await supabase.from('profiles').insert({
             id: currentUser.id,
             email: currentUser.email,
@@ -136,7 +153,6 @@ export default function AdminDashboard() {
             created_at: new Date().toISOString()
           })
         } else if (profile.role !== 'admin') {
-          // Redirect based on role
           if (profile.role === 'farmer') {
             router.replace("/farmer/dashboard")
           } else if (profile.role === 'distributor') {
@@ -160,7 +176,6 @@ export default function AdminDashboard() {
       }
     }
 
-    // Handle back button press
     const handleBackButton = (e: PopStateEvent) => {
       supabase.auth.getUser().then(({ data: { user } }) => {
         if (user) {
@@ -172,10 +187,8 @@ export default function AdminDashboard() {
     }
 
     checkAuth()
-    
     window.addEventListener('popstate', handleBackButton)
 
-    // Prevent back button with keyboard
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Backspace' && e.target === document.body) {
         e.preventDefault()
@@ -200,13 +213,13 @@ export default function AdminDashboard() {
         fetchDistributors(),
         fetchRetailers(),
         fetchProducts(),
-        fetchOrders(),
-        fetchDistributorPurchases() // NEW: Fetch distributor purchases
+        fetchTransactions()
       ])
       await calculateStats()
       await calculateNotifications()
       generateRecentActivities()
       organizeFarmerProducts()
+      organizeFarmerSales()
     } catch (error) {
       console.error("Error fetching data:", error)
     } finally {
@@ -240,33 +253,6 @@ export default function AdminDashboard() {
     }
   }
 
-  // NEW: Fetch distributor purchases
-  const fetchDistributorPurchases = async () => {
-    try {
-      // Try to fetch from purchases table
-      const { data: purchasesData, error } = await supabase
-        .from('purchases')
-        .select('*')
-        .order('purchased_at', { ascending: false })
-
-      if (!error && purchasesData) {
-        // Organize purchases by distributor
-        const purchasesByDistributor: {[key: string]: any[]} = {}
-        purchasesData.forEach(purchase => {
-          if (purchase.distributor_id) {
-            if (!purchasesByDistributor[purchase.distributor_id]) {
-              purchasesByDistributor[purchase.distributor_id] = []
-            }
-            purchasesByDistributor[purchase.distributor_id].push(purchase)
-          }
-        })
-        setDistributorPurchases(purchasesByDistributor)
-      }
-    } catch (error) {
-      console.error("Error fetching distributor purchases:", error)
-    }
-  }
-
   // Fetch retailers
   const fetchRetailers = async () => {
     const { data, error } = await supabase
@@ -280,10 +266,9 @@ export default function AdminDashboard() {
     }
   }
 
-  // Fetch products with farmer information
+  // Fetch products
   const fetchProducts = async () => {
     try {
-      // Fetch all products
       const { data: productsData, error } = await supabase
         .from('products')
         .select('*')
@@ -299,13 +284,11 @@ export default function AdminDashboard() {
         return
       }
 
-      // Fetch all farmers to map to products
       const { data: farmersData } = await supabase
         .from('profiles')
         .select('id, email, business_name')
         .eq('role', 'farmer')
 
-      // Create a map of farmer_id -> farmer details
       const farmersMap = new Map()
       if (farmersData) {
         farmersData.forEach(farmer => {
@@ -313,7 +296,6 @@ export default function AdminDashboard() {
         })
       }
 
-      // Combine products with farmer information
       const productsWithFarmers = productsData.map(product => ({
         ...product,
         farmer: farmersMap.get(product.farmer_id) || null
@@ -325,52 +307,28 @@ export default function AdminDashboard() {
     }
   }
 
-  // Fetch orders
-  const fetchOrders = async () => {
+  // Fetch transactions
+  const fetchTransactions = async () => {
     try {
-      // Try to fetch from orders table
-      const { data, error } = await supabase
-        .from('orders')
+      const { data: purchases, error } = await supabase
+        .from('purchases')
         .select(`
           *,
           product:products(*),
-          farmer:profiles!orders_farmer_id_fkey(*)
+          farmer:profiles!purchases_farmer_id_fkey(*),
+          buyer:profiles!purchases_distributor_id_fkey(*)
         `)
-        .order('created_at', { ascending: false })
+        .order('purchased_at', { ascending: false })
 
-      if (!error && data) {
-        setOrders(data)
+      if (!error && purchases) {
+        setTransactions(purchases)
       } else {
-        // Use products with status as orders
-        await fetchProductsForOrders()
+        // If purchases table doesn't exist yet, create empty array
+        setTransactions([])
       }
     } catch (error) {
-      console.error("Error fetching orders:", error)
-      await fetchProductsForOrders()
-    }
-  }
-
-  // Fetch products for orders (fallback)
-  const fetchProductsForOrders = async () => {
-    const { data: productsData } = await supabase
-      .from('products')
-      .select('*')
-      .in('status', ['Processing', 'Confirmed', 'Shipped', 'In Transit'])
-      .order('created_at', { ascending: false })
-
-    if (productsData) {
-      const fakeOrders: Order[] = productsData.map(product => ({
-        id: product.id,
-        product_id: product.id,
-        farmer_id: product.farmer_id,
-        distributor_id: null,
-        quantity: product.quantity,
-        price: product.price_per_quintal * product.quantity,
-        status: product.status,
-        created_at: product.created_at,
-        product: product
-      }))
-      setOrders(fakeOrders)
+      console.error("Error fetching transactions:", error)
+      setTransactions([])
     }
   }
 
@@ -390,10 +348,25 @@ export default function AdminDashboard() {
     setFarmerProducts(farmerProductsMap)
   }
 
+  // Organize sales by farmer
+  const organizeFarmerSales = () => {
+    const farmerSalesMap: {[key: string]: Transaction[]} = {}
+    
+    transactions.forEach(transaction => {
+      if (transaction.farmer_id) {
+        if (!farmerSalesMap[transaction.farmer_id]) {
+          farmerSalesMap[transaction.farmer_id] = []
+        }
+        farmerSalesMap[transaction.farmer_id].push(transaction)
+      }
+    })
+    
+    setFarmerSales(farmerSalesMap)
+  }
+
   // Calculate statistics
   const calculateStats = async () => {
     try {
-      // Get current counts
       const [
         farmersCount,
         distributorsCount,
@@ -406,18 +379,16 @@ export default function AdminDashboard() {
         supabase.from('products').select('id', { count: 'exact' })
       ])
 
-      // Calculate total revenue
+      // Calculate total revenue from transactions
       let totalRevenue = 0
-      if (products.length > 0) {
-        totalRevenue = products.reduce((sum, product) => {
-          return sum + (product.quantity * product.price_per_quintal)
+      if (transactions.length > 0) {
+        totalRevenue = transactions.reduce((sum, transaction) => {
+          return sum + (transaction.total_amount || 0)
         }, 0)
       }
 
-      // Calculate active orders
-      const activeOrders = orders.filter(order => 
-        ['Processing', 'Confirmed', 'Shipped', 'In Transit'].includes(order.status)
-      ).length
+      // Count sold products
+      const soldProducts = products.filter(p => p.blockchain_status === 'sold' || p.status === 'Sold').length
 
       // Calculate pending verifications
       const pendingFarmerVerifications = farmers.filter(f => !f.verified).length
@@ -426,23 +397,23 @@ export default function AdminDashboard() {
       // Previous month data (simulated)
       const previousFarmers = Math.max(0, (farmersCount.count || 0) - Math.floor(Math.random() * 5))
       const previousProducts = Math.max(0, (productsCount.count || 0) - Math.floor(Math.random() * 10))
-      const previousOrders = Math.max(0, activeOrders - Math.floor(Math.random() * 3))
+      const previousOrders = Math.max(0, transactions.length - Math.floor(Math.random() * 3))
 
       setStats({
         totalFarmers: farmersCount.count || 0,
         totalDistributors: distributorsCount.count || 0,
         totalRetailers: retailersCount.count || 0,
         totalProducts: productsCount.count || 0,
-        activeOrders,
+        soldProducts: soldProducts,
+        activeOrders: transactions.length,
         totalRevenue,
         pendingVerifications: pendingFarmerVerifications,
-        pendingDistributorVerifications, // NEW: Store distributor pending verifications
+        pendingDistributorVerifications,
         previousFarmers,
         previousProducts,
         previousOrders
       })
 
-      // Update notifications
       const totalNotifications = pendingFarmerVerifications + pendingDistributorVerifications
       setNotifications(totalNotifications > 0 ? totalNotifications : 0)
     } catch (error) {
@@ -471,23 +442,24 @@ export default function AdminDashboard() {
   const generateRecentActivities = () => {
     const activities: any[] = []
     
+    // Recent transactions
+    transactions.slice(0, 3).forEach(transaction => {
+      activities.push({
+        action: `Product sold: ${transaction.product?.product_name || 'Unknown'}`,
+        user: transaction.farmer?.business_name || transaction.farmer?.email?.split('@')[0] || 'Farmer',
+        time: formatTimeAgo(transaction.purchased_at),
+        type: 'sale',
+        amount: transaction.total_amount
+      })
+    })
+    
     // Recent farmer registrations
-    farmers.slice(0, 3).forEach(farmer => {
+    farmers.slice(0, 2).forEach(farmer => {
       activities.push({
         action: "New farmer registered",
         user: farmer.business_name || farmer.email.split('@')[0],
         time: formatTimeAgo(farmer.created_at),
         type: 'farmer'
-      })
-    })
-    
-    // Recent distributor registrations
-    distributors.slice(0, 2).forEach(distributor => {
-      activities.push({
-        action: "New distributor registered",
-        user: distributor.business_name || distributor.email.split('@')[0],
-        time: formatTimeAgo(distributor.created_at),
-        type: 'distributor'
       })
     })
     
@@ -504,9 +476,8 @@ export default function AdminDashboard() {
       })
     })
     
-    // Sort by time
     activities.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
-    setRecentActivities(activities.slice(0, 4))
+    setRecentActivities(activities.slice(0, 5))
   }
 
   // Format time ago
@@ -534,8 +505,20 @@ export default function AdminDashboard() {
     return new Date(dateString).toLocaleDateString('en-IN', {
       day: '2-digit',
       month: 'short',
-      year: 'numeric'
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     })
+  }
+
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    if (amount >= 100000) {
+      return `₹${(amount / 100000).toFixed(1)}L`
+    } else if (amount >= 1000) {
+      return `₹${(amount / 1000).toFixed(1)}k`
+    }
+    return `₹${amount}`
   }
 
   // Calculate percentage change
@@ -567,16 +550,6 @@ export default function AdminDashboard() {
     }
   }
 
-  // Format currency
-  const formatCurrency = (amount: number) => {
-    if (amount >= 100000) {
-      return `₹${(amount / 100000).toFixed(1)}L`
-    } else if (amount >= 1000) {
-      return `₹${(amount / 1000).toFixed(1)}k`
-    }
-    return `₹${amount}`
-  }
-
   // Handle logout
   const handleLogout = async () => {
     try {
@@ -594,7 +567,7 @@ export default function AdminDashboard() {
     fetchAllData()
   }
 
-  // Toggle verification for any user
+  // Toggle verification
   const toggleVerification = async (userId: string, currentVerified: boolean, role: string) => {
     try {
       const { error } = await supabase
@@ -604,7 +577,6 @@ export default function AdminDashboard() {
 
       if (error) throw error
 
-      // Refresh relevant data
       if (role === 'farmer') {
         await fetchFarmers()
       } else if (role === 'distributor') {
@@ -620,38 +592,16 @@ export default function AdminDashboard() {
     }
   }
 
-  // View user details
-  const viewUserDetails = (user: UserProfile, role: string) => {
-    let details = ""
-    
-    if (role === 'farmer') {
-      const userProducts = farmerProducts[user.id] || []
-      details = `
-Email: ${user.email}
-Business Name: ${user.business_name || 'Not provided'}
-Phone: ${user.phone || 'Not provided'}
-Address: ${user.address || 'Not provided'}
-Verified: ${user.verified ? 'Yes ✅' : 'No ❌'}
-Registered: ${formatDate(user.created_at)}
-Total Products: ${userProducts.length}
-Total Quantity: ${userProducts.reduce((sum, p) => sum + p.quantity, 0)} quintals
-Total Value: ${formatCurrency(userProducts.reduce((sum, p) => sum + (p.quantity * p.price_per_quintal), 0))}
-      `
-    } else if (role === 'distributor') {
-      const userPurchases = distributorPurchases[user.id] || []
-      details = `
-Email: ${user.email}
-Business Name: ${user.business_name || 'Not provided'}
-Phone: ${user.phone || 'Not provided'}
-Address: ${user.address || 'Not provided'}
-Verified: ${user.verified ? 'Yes ✅' : 'No ❌'}
-Registered: ${formatDate(user.created_at)}
-Total Purchases: ${userPurchases.length}
-Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_amount || 0), 0))}
-      `
-    }
-    
-    alert(`${role.charAt(0).toUpperCase() + role.slice(1)} Details:\n\n${details}`)
+  // Copy to clipboard
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    alert('Copied to clipboard!')
+  }
+
+  // View transaction details
+  const viewTransactionDetails = (transaction: Transaction) => {
+    setSelectedTransaction(transaction)
+    setShowTransactionDetails(true)
   }
 
   // Filter farmers
@@ -693,7 +643,7 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
     )
   }
 
-  // Calculate dynamic stats
+  // Dynamic stats for dashboard
   const dynamicStats = [
     { 
       label: "Total Farmers", 
@@ -708,13 +658,13 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
       }
     },
     { 
-      label: "Active Orders", 
-      value: stats.activeOrders.toString(), 
-      change: getChangeInfo(calculatePercentageChange(stats.activeOrders, stats.previousOrders)),
+      label: "Total Sales", 
+      value: transactions.length.toString(), 
+      change: getChangeInfo(calculatePercentageChange(transactions.length, stats.previousOrders)),
       previous: stats.previousOrders.toString(),
-      icon: FileText,
+      icon: DollarSign,
       pending: 0,
-      action: () => setActiveTab("orders")
+      action: () => setActiveTab("transactions")
     },
     { 
       label: "Total Distributors", 
@@ -730,21 +680,21 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
     },
   ]
 
-  const dynamicPlatformStats = [
+  const platformStats = [
     { 
-      label: "Total Users", 
-      value: (stats.totalFarmers + stats.totalDistributors + stats.totalRetailers).toString(), 
-      description: "Registered users" 
-    },
-    { 
-      label: "Active Orders", 
-      value: stats.activeOrders.toString(), 
-      description: "Not delivered yet" 
-    },
-    { 
-      label: "Products", 
+      label: "Total Products", 
       value: stats.totalProducts.toString(), 
-      description: "On blockchain" 
+      description: "Registered products" 
+    },
+    { 
+      label: "Sold Products", 
+      value: stats.soldProducts.toString(), 
+      description: "Successfully sold" 
+    },
+    { 
+      label: "Active Products", 
+      value: (stats.totalProducts - stats.soldProducts).toString(), 
+      description: "Available for sale" 
     },
     { 
       label: "Revenue", 
@@ -777,7 +727,7 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
               { id: "distributors", label: "Distributors", icon: Truck },
               { id: "retailers", label: "Retailers", icon: Store },
               { id: "products", label: "Products", icon: Package },
-              { id: "orders", label: "Orders", icon: FileText },
+              { id: "transactions", label: "Transactions", icon: FileText },
               { id: "billing", label: "Billing", icon: DollarSign },
               { id: "security", label: "Security", icon: Shield },
             ].map((item) => (
@@ -841,14 +791,14 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                   {activeTab === "distributors" && `Distributors Management (${distributors.length})`}
                   {activeTab === "retailers" && `Retailers (${retailers.length})`}
                   {activeTab === "products" && `Products (${products.length})`}
-                  {activeTab === "orders" && `Orders (${orders.length})`}
+                  {activeTab === "transactions" && `Transactions (${transactions.length})`}
                   {activeTab === "billing" && "Billing System"}
                   {activeTab === "security" && "Security Settings"}
                 </h1>
                 <p className="text-sm text-gray-400 mt-1">
                   {activeTab === "dashboard" && "Real-time platform overview & analytics"}
-                  {activeTab === "distributors" && `Manage ${distributors.length} distributors on the platform`}
-                  {activeTab !== "dashboard" && activeTab !== "distributors" && `Manage ${activeTab} on the platform`}
+                  {activeTab === "transactions" && `View all blockchain transactions and sales`}
+                  {activeTab !== "dashboard" && activeTab !== "transactions" && `Manage ${activeTab} on the platform`}
                 </p>
               </div>
               
@@ -856,7 +806,6 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                 {notifications > 0 && (
                   <button 
                     onClick={() => {
-                      // Show dropdown for which notifications to view
                       const confirmed = confirm(
                         `You have ${notifications} pending verifications:\n` +
                         `• ${stats.pendingVerifications} farmers\n` +
@@ -895,7 +844,7 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 p-6 bg-black">
+        <main className="flex-1 p-6 bg-black overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-center">
@@ -951,16 +900,19 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                               <div className="flex items-center gap-3">
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                                   activity.type === 'farmer' ? 'bg-emerald-500/20' :
-                                  activity.type === 'distributor' ? 'bg-blue-500/20' :
+                                  activity.type === 'sale' ? 'bg-green-500/20' :
                                   'bg-yellow-500/20'
                                 }`}>
                                   {activity.type === 'farmer' ? <Users className="h-4 w-4 text-emerald-400" /> :
-                                   activity.type === 'distributor' ? <Truck className="h-4 w-4 text-blue-400" /> :
+                                   activity.type === 'sale' ? <DollarSign className="h-4 w-4 text-green-400" /> :
                                    <Package className="h-4 w-4 text-yellow-400" />}
                                 </div>
                                 <div>
                                   <p className="text-sm font-medium text-white">{activity.action}</p>
                                   <p className="text-xs text-gray-400">by {activity.user}</p>
+                                  {activity.amount && (
+                                    <p className="text-xs text-green-400">{formatCurrency(activity.amount)}</p>
+                                  )}
                                 </div>
                               </div>
                               <span className="text-xs text-gray-400">{activity.time}</span>
@@ -980,7 +932,7 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-3xl font-bold text-white">{formatCurrency(stats.totalRevenue)}</p>
-                          <p className="text-sm text-gray-400 mt-1">from all products</p>
+                          <p className="text-sm text-gray-400 mt-1">from {transactions.length} transactions</p>
                         </div>
                         <div className="w-20 h-20 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center text-white font-bold shadow-lg">
                           {formatCurrency(stats.totalRevenue).replace('₹', '')}
@@ -993,7 +945,7 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                   <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
                     <h3 className="text-lg font-semibold text-white mb-6">Platform Overview</h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                      {dynamicPlatformStats.map((stat, index) => (
+                      {platformStats.map((stat, index) => (
                         <div key={index} className="text-center group cursor-pointer p-4 hover:bg-gray-800 rounded-lg transition-colors">
                           <div className="w-16 h-16 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-xl flex items-center justify-center mx-auto mb-3 shadow-lg group-hover:scale-110 transition-transform">
                             <span className="text-white font-bold text-sm">{stat.value}</span>
@@ -1037,126 +989,118 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                   </div>
 
                   {/* Farmers List */}
-                  <div className="space-y-4">
-                    {filteredFarmers.map((farmer) => (
-                      <div key={farmer.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center text-white font-medium">
-                                {farmer.business_name?.charAt(0) || farmer.email.charAt(0).toUpperCase()}
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                    {filteredFarmers.map((farmer) => {
+                      const farmerProductsList = farmerProducts[farmer.id] || []
+                      const farmerSalesList = farmerSales[farmer.id] || []
+                      const totalEarnings = farmerSalesList.reduce((sum, sale) => sum + (sale.total_amount || 0), 0)
+                      
+                      return (
+                        <div key={farmer.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-3">
+                                <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center text-white font-medium">
+                                  {farmer.business_name?.charAt(0) || farmer.email.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <h4 className="font-semibold text-white">{farmer.business_name || 'No Business Name'}</h4>
+                                  <p className="text-sm text-gray-400 flex items-center gap-2">
+                                    <Mail className="h-3 w-3" />
+                                    {farmer.email}
+                                  </p>
+                                </div>
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  farmer.verified ? 'bg-emerald-900/30 text-emerald-400' : 'bg-yellow-900/30 text-yellow-400'
+                                }`}>
+                                  {farmer.verified ? 'Verified' : 'Unverified'}
+                                </span>
                               </div>
-                              <div>
-                                <h4 className="font-semibold text-white">{farmer.business_name || 'No Business Name'}</h4>
-                                <p className="text-sm text-gray-400 flex items-center gap-2">
-                                  <Mail className="h-3 w-3" />
-                                  {farmer.email}
-                                </p>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm mb-3">
+                                {farmer.phone && (
+                                  <div className="flex items-center gap-2 text-gray-400">
+                                    <Phone className="h-4 w-4" />
+                                    <span className="text-white">{farmer.phone}</span>
+                                  </div>
+                                )}
+                                {farmer.wallet_address && (
+                                  <div className="flex items-center gap-2 text-gray-400">
+                                    <Wallet className="h-4 w-4" />
+                                    <span className="text-white font-mono text-xs">
+                                      {farmer.wallet_address.substring(0, 10)}...
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="text-gray-400">
+                                  Products: <span className="text-white">{farmerProductsList.length}</span>
+                                </div>
+                                <div className="text-gray-400">
+                                  Earnings: <span className="text-green-400">{formatCurrency(totalEarnings)}</span>
+                                </div>
                               </div>
-                              <span className={`px-2 py-1 text-xs rounded-full ${
-                                farmer.verified ? 'bg-emerald-900/30 text-emerald-400' : 'bg-yellow-900/30 text-yellow-400'
-                              }`}>
-                                {farmer.verified ? 'Verified' : 'Unverified'}
-                              </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-3">
-                              {farmer.phone && (
-                                <div className="flex items-center gap-2 text-gray-400">
-                                  <Phone className="h-4 w-4" />
-                                  <span className="text-white">{farmer.phone}</span>
+
+                              {/* Farmer's Recent Sales */}
+                              {farmerSalesList.length > 0 && (
+                                <div className="mt-4 pt-4 border-t border-gray-800">
+                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Recent Sales ({farmerSalesList.length})</h5>
+                                  <div className="space-y-2">
+                                    {farmerSalesList.slice(0, 3).map(sale => (
+                                      <div key={sale.id} className="flex justify-between items-center p-2 bg-gray-800/50 rounded">
+                                        <div>
+                                          <p className="text-sm text-white">{sale.product?.product_name || 'Product'}</p>
+                                          <p className="text-xs text-gray-400">
+                                            {sale.quantity} quintals • ₹{sale.price_per_quintal}/quintal
+                                          </p>
+                                        </div>
+                                        <div className="text-right">
+                                          <p className="text-sm text-green-400">{formatCurrency(sale.total_amount)}</p>
+                                          <p className="text-xs text-gray-500">{formatDate(sale.purchased_at)}</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {farmerSalesList.length > 3 && (
+                                      <p className="text-xs text-gray-500 text-center">
+                                        +{farmerSalesList.length - 3} more sales
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
                               )}
-                              {farmer.address && (
-                                <div className="flex items-center gap-2 text-gray-400">
-                                  <MapPin className="h-4 w-4" />
-                                  <span className="text-white truncate">{farmer.address}</span>
-                                </div>
-                              )}
-                              <div className="text-gray-400">
-                                Registered: <span className="text-white">{formatDate(farmer.created_at)}</span>
-                              </div>
                             </div>
 
-                            {/* Farmer's Products */}
-                            {farmerProducts[farmer.id] && farmerProducts[farmer.id].length > 0 && (
-                              <div className="mt-4 pt-4 border-t border-gray-800">
-                                <h5 className="text-sm font-medium text-gray-400 mb-2">Products ({farmerProducts[farmer.id].length})</h5>
-                                <div className="space-y-2">
-                                  {farmerProducts[farmer.id].slice(0, 3).map(product => (
-                                    <div key={product.id} className="flex justify-between items-center p-2 bg-gray-800/50 rounded">
-                                      <div>
-                                        <p className="text-sm text-white">{product.product_name}</p>
-                                        <p className="text-xs text-gray-400">{product.category} • {product.quantity} quintals</p>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-sm text-white">₹{product.quantity * product.price_per_quintal}</p>
-                                        <span className={`text-xs px-2 py-1 rounded-full ${
-                                          product.status === 'Registered' ? 'bg-emerald-900/30 text-emerald-400' :
-                                          product.status === 'Processing' ? 'bg-yellow-900/30 text-yellow-400' :
-                                          'bg-blue-900/30 text-blue-400'
-                                        }`}>
-                                          {product.status}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                  {farmerProducts[farmer.id].length > 3 && (
-                                    <p className="text-xs text-gray-500 text-center">
-                                      +{farmerProducts[farmer.id].length - 3} more products
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex flex-col gap-2 ml-4">
-                            <button
-                              onClick={() => viewUserDetails(farmer, 'farmer')}
-                              className="px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-2"
-                            >
-                              <Eye className="h-4 w-4" />
-                              Details
-                            </button>
-                            <button
-                              onClick={() => toggleVerification(farmer.id, farmer.verified, 'farmer')}
-                              className={`px-3 py-2 text-sm rounded-lg border transition-colors flex items-center gap-2 ${
-                                farmer.verified 
-                                  ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400 border-red-800' 
-                                  : 'bg-emerald-900/20 hover:bg-emerald-900/30 text-emerald-400 border-emerald-800'
-                              }`}
-                            >
-                              {farmer.verified ? (
-                                <>
-                                  <UserX className="h-4 w-4" />
-                                  Unverify
-                                </>
-                              ) : (
-                                <>
-                                  <UserCheck className="h-4 w-4" />
-                                  Verify
-                                </>
-                              )}
-                            </button>
+                            {/* Actions */}
+                            <div className="flex flex-col gap-2 ml-4">
+                              <button
+                                onClick={() => toggleVerification(farmer.id, farmer.verified, 'farmer')}
+                                className={`px-3 py-2 text-sm rounded-lg border transition-colors flex items-center gap-2 ${
+                                  farmer.verified 
+                                    ? 'bg-red-900/20 hover:bg-red-900/30 text-red-400 border-red-800' 
+                                    : 'bg-emerald-900/20 hover:bg-emerald-900/30 text-emerald-400 border-emerald-800'
+                                }`}
+                              >
+                                {farmer.verified ? (
+                                  <>
+                                    <UserX className="h-4 w-4" />
+                                    Unverify
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserCheck className="h-4 w-4" />
+                                    Verify
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                     
                     {filteredFarmers.length === 0 && (
                       <div className="text-center py-8">
                         <Users className="h-12 w-12 mx-auto mb-4 text-gray-600" />
                         <p className="text-gray-400">No farmers found</p>
-                        {searchQuery && (
-                          <button
-                            onClick={() => setSearchQuery("")}
-                            className="text-sm text-emerald-500 hover:text-emerald-400 mt-2"
-                          >
-                            Clear search
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
@@ -1192,39 +1136,11 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                     </select>
                   </div>
 
-                  {/* Distributor Statistics */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                    <div className="bg-gray-800/50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-400">Total Distributors</p>
-                      <p className="text-2xl font-bold text-white">{distributors.length}</p>
-                    </div>
-                    <div className="bg-gray-800/50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-400">Verified</p>
-                      <p className="text-2xl font-bold text-emerald-500">
-                        {distributors.filter(d => d.verified).length}
-                      </p>
-                    </div>
-                    <div className="bg-gray-800/50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-400">Unverified</p>
-                      <p className="text-2xl font-bold text-yellow-500">
-                        {distributors.filter(d => !d.verified).length}
-                      </p>
-                    </div>
-                    <div className="bg-gray-800/50 p-4 rounded-lg">
-                      <p className="text-sm text-gray-400">Total Purchases</p>
-                      <p className="text-2xl font-bold text-blue-500">
-                        {Object.values(distributorPurchases).flat().length}
-                      </p>
-                    </div>
-                  </div>
-
                   {/* Distributors List */}
-                  <div className="space-y-4">
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
                     {filteredDistributors.map((distributor) => {
-                      const distributorPurchasesList = distributorPurchases[distributor.id] || []
-                      const totalSpent = distributorPurchasesList.reduce((sum, purchase) => 
-                        sum + (purchase.total_amount || 0), 0
-                      )
+                      const distributorTransactions = transactions.filter(t => t.distributor_id === distributor.id)
+                      const totalSpent = distributorTransactions.reduce((sum, t) => sum + (t.total_amount || 0), 0)
                       
                       return (
                         <div key={distributor.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
@@ -1255,45 +1171,41 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                                     <span className="text-white">{distributor.phone}</span>
                                   </div>
                                 )}
-                                {distributor.address && (
+                                {distributor.wallet_address && (
                                   <div className="flex items-center gap-2 text-gray-400">
-                                    <MapPin className="h-4 w-4" />
-                                    <span className="text-white truncate">{distributor.address}</span>
+                                    <Wallet className="h-4 w-4" />
+                                    <span className="text-white font-mono text-xs">
+                                      {distributor.wallet_address.substring(0, 10)}...
+                                    </span>
                                   </div>
                                 )}
                                 <div className="text-gray-400">
-                                  Registered: <span className="text-white">{formatDate(distributor.created_at)}</span>
+                                  Purchases: <span className="text-white">{distributorTransactions.length}</span>
                                 </div>
                               </div>
 
-                              {/* Distributor's Purchases */}
-                              {distributorPurchasesList.length > 0 && (
+                              {/* Distributor's Recent Purchases */}
+                              {distributorTransactions.length > 0 && (
                                 <div className="mt-4 pt-4 border-t border-gray-800">
-                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Recent Purchases ({distributorPurchasesList.length})</h5>
+                                  <h5 className="text-sm font-medium text-gray-400 mb-2">Recent Purchases ({distributorTransactions.length})</h5>
                                   <div className="space-y-2">
-                                    {distributorPurchasesList.slice(0, 3).map(purchase => (
+                                    {distributorTransactions.slice(0, 3).map(purchase => (
                                       <div key={purchase.id} className="flex justify-between items-center p-2 bg-gray-800/50 rounded">
                                         <div>
-                                          <p className="text-sm text-white">Purchase #{purchase.id.substring(0, 8)}</p>
+                                          <p className="text-sm text-white">{purchase.product?.product_name || 'Product'}</p>
                                           <p className="text-xs text-gray-400">
-                                            {purchase.quantity_purchased || purchase.quantity} quintals • 
-                                            ₹{purchase.price_per_quintal || purchase.price}/quintal
+                                            {purchase.quantity} quintals • ₹{purchase.price_per_quintal}/quintal
                                           </p>
                                         </div>
                                         <div className="text-right">
-                                          <p className="text-sm text-white">₹{purchase.total_amount || 0}</p>
-                                          <span className={`text-xs px-2 py-1 rounded-full ${
-                                            purchase.status === 'Purchased' ? 'bg-emerald-900/30 text-emerald-400' :
-                                            'bg-yellow-900/30 text-yellow-400'
-                                          }`}>
-                                            {purchase.status || 'Completed'}
-                                          </span>
+                                          <p className="text-sm text-blue-400">{formatCurrency(purchase.total_amount)}</p>
+                                          <p className="text-xs text-gray-500">{formatDate(purchase.purchased_at)}</p>
                                         </div>
                                       </div>
                                     ))}
-                                    {distributorPurchasesList.length > 3 && (
+                                    {distributorTransactions.length > 3 && (
                                       <p className="text-xs text-gray-500 text-center">
-                                        +{distributorPurchasesList.length - 3} more purchases
+                                        +{distributorTransactions.length - 3} more purchases
                                       </p>
                                     )}
                                   </div>
@@ -1309,13 +1221,6 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                               </div>
                               
                               <div className="flex flex-col gap-2">
-                                <button
-                                  onClick={() => viewUserDetails(distributor, 'distributor')}
-                                  className="px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-2"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  Details
-                                </button>
                                 <button
                                   onClick={() => toggleVerification(distributor.id, distributor.verified, 'distributor')}
                                   className={`px-3 py-2 text-sm rounded-lg border transition-colors flex items-center gap-2 ${
@@ -1347,47 +1252,238 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
                       <div className="text-center py-8">
                         <Truck className="h-12 w-12 mx-auto mb-4 text-gray-600" />
                         <p className="text-gray-400">No distributors found</p>
-                        {distributorSearchQuery && (
-                          <button
-                            onClick={() => setDistributorSearchQuery("")}
-                            className="text-sm text-blue-500 hover:text-blue-400 mt-2"
-                          >
-                            Clear search
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Other Tabs */}
-              {activeTab !== "dashboard" && activeTab !== "farmers" && activeTab !== "distributors" && activeTab !== "products" && (
+              {activeTab === "transactions" && (
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">All Blockchain Transactions</h3>
+                  
+                  {/* Transaction Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Total Transactions</p>
+                      <p className="text-2xl font-bold text-white">{transactions.length}</p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Total Volume</p>
+                      <p className="text-2xl font-bold text-emerald-500">
+                        {formatCurrency(transactions.reduce((sum, t) => sum + (t.total_amount || 0), 0))}
+                      </p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Farmers Involved</p>
+                      <p className="text-2xl font-bold text-blue-500">
+                        {Object.keys(farmerSales).length}
+                      </p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Avg Transaction</p>
+                      <p className="text-2xl font-bold text-purple-500">
+                        {transactions.length > 0 
+                          ? formatCurrency(transactions.reduce((sum, t) => sum + (t.total_amount || 0), 0) / transactions.length)
+                          : '₹0'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Transactions List */}
+                  <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                    {transactions.map((transaction) => (
+                      <div 
+                        key={transaction.id} 
+                        className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors cursor-pointer"
+                        onClick={() => viewTransactionDetails(transaction)}
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-3">
+                              <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center">
+                                <FileText className="h-5 w-5 text-white" />
+                              </div>
+                              <div>
+                                <h4 className="font-semibold text-white">
+                                  {transaction.product?.product_name || 'Product'}
+                                </h4>
+                                <p className="text-sm text-gray-400">
+                                  Transaction #{transaction.id.substring(0, 8)}
+                                </p>
+                              </div>
+                              <span className="px-2 py-1 text-xs rounded-full bg-green-900/30 text-green-400">
+                                {transaction.status || 'Completed'}
+                              </span>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm mb-3">
+                              <div>
+                                <p className="text-gray-400">Farmer</p>
+                                <p className="text-white">
+                                  {transaction.farmer?.business_name || transaction.farmer?.email?.split('@')[0] || 'Unknown'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400">Buyer</p>
+                                <p className="text-white">
+                                  {transaction.buyer?.business_name || transaction.buyer?.email?.split('@')[0] || 'Distributor'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400">Quantity</p>
+                                <p className="text-white">{transaction.quantity} quintals</p>
+                              </div>
+                              <div>
+                                <p className="text-gray-400">Total Amount</p>
+                                <p className="text-emerald-400 font-semibold">{formatCurrency(transaction.total_amount)}</p>
+                              </div>
+                            </div>
+
+                            {transaction.transaction_hash && (
+                              <div className="mt-2 pt-2 border-t border-gray-800">
+                                <p className="text-xs text-gray-500 flex items-center gap-2">
+                                  <Shield className="h-3 w-3" />
+                                  Blockchain TX: {transaction.transaction_hash.substring(0, 30)}...
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      copyToClipboard(transaction.transaction_hash!)
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300"
+                                  >
+                                    <Copy className="h-3 w-3" />
+                                  </button>
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-right ml-4">
+                            <p className="text-xs text-gray-500">{formatDate(transaction.purchased_at)}</p>
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                viewTransactionDetails(transaction)
+                              }}
+                              className="mt-2 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+                            >
+                              View Details
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {transactions.length === 0 && (
+                      <div className="text-center py-8">
+                        <FileText className="h-12 w-12 mx-auto mb-4 text-gray-600" />
+                        <p className="text-gray-400">No transactions yet</p>
+                        <p className="text-sm text-gray-500">Transactions will appear here when products are sold on the blockchain</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "products" && (
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4">Products Overview</h3>
+                  
+                  {/* Product Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Total Products</p>
+                      <p className="text-2xl font-bold text-white">{products.length}</p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Blockchain Verified</p>
+                      <p className="text-2xl font-bold text-emerald-500">
+                        {products.filter(p => p.blockchain_verified).length}
+                      </p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Sold Products</p>
+                      <p className="text-2xl font-bold text-blue-500">{stats.soldProducts}</p>
+                    </div>
+                    <div className="bg-gray-800/50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-400">Available</p>
+                      <p className="text-2xl font-bold text-green-500">{stats.totalProducts - stats.soldProducts}</p>
+                    </div>
+                  </div>
+
+                  {/* Products List */}
+                  <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                    {products.map((product) => (
+                      <div key={product.id} className="border border-gray-800 rounded-lg p-4 hover:bg-gray-800/50 transition-colors">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap mb-2">
+                              <h4 className="font-semibold text-white">{product.product_name}</h4>
+                              {product.blockchain_verified && (
+                                <span className="text-xs bg-green-900 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <Shield className="h-3 w-3" />
+                                  Blockchain
+                                </span>
+                              )}
+                              {product.blockchain_status === 'sold' && (
+                                <span className="text-xs bg-blue-900 text-blue-400 px-2 py-0.5 rounded-full">
+                                  Sold
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-400">
+                              {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
+                            </p>
+                            <p className="text-xs text-gray-500 flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {product.farm_location}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Farmer: {product.farmer?.business_name || product.farmer?.email || 'Unknown'}
+                            </p>
+                            {product.blockchain_id && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Blockchain ID: {product.blockchain_id}
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-white font-semibold">
+                              {formatCurrency(product.quantity * product.price_per_quintal)}
+                            </p>
+                            <p className="text-xs text-gray-500">{formatDate(product.created_at)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {products.length === 0 && (
+                      <div className="text-center py-8">
+                        <Package className="h-12 w-12 mx-auto mb-4 text-gray-600" />
+                        <p className="text-gray-400">No products registered yet</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Other Tabs Placeholder */}
+              {(activeTab === "retailers" || activeTab === "billing" || activeTab === "security") && (
                 <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
                   <div className="text-center py-12">
                     <div className="w-16 h-16 bg-gradient-to-r from-emerald-500 to-teal-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                      {activeTab === "products" && <Package className="h-8 w-8 text-white" />}
                       {activeTab === "retailers" && <Store className="h-8 w-8 text-white" />}
-                      {activeTab === "orders" && <FileText className="h-8 w-8 text-white" />}
                       {activeTab === "billing" && <DollarSign className="h-8 w-8 text-white" />}
                       {activeTab === "security" && <Shield className="h-8 w-8 text-white" />}
                     </div>
                     <h3 className="text-xl font-semibold text-white mb-2">
                       {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Management
                     </h3>
-                    <p className="text-gray-400 mb-6">
-                      {activeTab === "products" && `Manage ${products.length} products.`}
-                      {activeTab === "retailers" && `Manage ${retailers.length} retailers.`}
-                      {activeTab === "orders" && `Track ${orders.length} active orders.`}
+                    <p className="text-gray-400">
+                      {activeTab === "retailers" && `Manage ${retailers.length} retailers on the platform.`}
                       {activeTab === "billing" && "Handle billing and payments."}
                       {activeTab === "security" && "Configure security settings."}
                     </p>
-                    <Button 
-                      className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600"
-                      onClick={refreshData}
-                    >
-                      Refresh Data
-                    </Button>
                   </div>
                 </div>
               )}
@@ -1395,6 +1491,103 @@ Total Spent: ${formatCurrency(userPurchases.reduce((sum, p) => sum + (p.total_am
           )}
         </main>
       </div>
+
+      {/* Transaction Details Modal */}
+      {showTransactionDetails && selectedTransaction && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-lg border border-gray-800 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-800 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <FileText className="h-5 w-5 text-emerald-500" />
+                Transaction Details
+              </h3>
+              <button
+                onClick={() => setShowTransactionDetails(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <XCircle className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Transaction ID</p>
+                  <p className="text-white font-mono text-sm break-all">{selectedTransaction.id}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Status</p>
+                  <p className="text-green-400 font-medium">{selectedTransaction.status || 'Completed'}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Product</p>
+                  <p className="text-white">{selectedTransaction.product?.product_name}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Category</p>
+                  <p className="text-white">{selectedTransaction.product?.category}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Farmer</p>
+                  <p className="text-white">{selectedTransaction.farmer?.business_name || selectedTransaction.farmer?.email}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Buyer</p>
+                  <p className="text-white">{selectedTransaction.buyer?.business_name || selectedTransaction.buyer?.email || 'Distributor'}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Quantity</p>
+                  <p className="text-white">{selectedTransaction.quantity} quintals</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Price per Quintal</p>
+                  <p className="text-white">₹{selectedTransaction.price_per_quintal}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Total Amount</p>
+                  <p className="text-emerald-400 font-bold text-lg">{formatCurrency(selectedTransaction.total_amount)}</p>
+                </div>
+                <div className="p-3 bg-gray-800 rounded-lg">
+                  <p className="text-xs text-gray-400">Purchase Date</p>
+                  <p className="text-white">{formatDate(selectedTransaction.purchased_at)}</p>
+                </div>
+                {selectedTransaction.product?.farm_location && (
+                  <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                    <p className="text-xs text-gray-400">Farm Location</p>
+                    <p className="text-white flex items-center gap-1">
+                      <MapPin className="h-3 w-3" />
+                      {selectedTransaction.product.farm_location}
+                    </p>
+                  </div>
+                )}
+                {selectedTransaction.transaction_hash && (
+                  <div className="col-span-2 p-3 bg-gray-800 rounded-lg">
+                    <p className="text-xs text-gray-400">Blockchain Transaction Hash</p>
+                    <p className="text-white font-mono text-sm break-all flex items-center gap-2">
+                      {selectedTransaction.transaction_hash}
+                      <button 
+                        onClick={() => copyToClipboard(selectedTransaction.transaction_hash!)}
+                        className="text-blue-400 hover:text-blue-300"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => setShowTransactionDetails(false)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

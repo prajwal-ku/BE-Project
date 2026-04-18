@@ -27,7 +27,7 @@ import {
   Loader2,
   Globe,
   Layers,
-  Map,
+  Map as MapIcon,
   AlertCircle,
   Compass,
   LocateFixed,
@@ -37,17 +37,30 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
-  Crosshair
+  Crosshair,
+  Copy,
+  Wallet,
+  ShieldCheck,
+  TrendingUp,
+  Calendar,
+  Award,
+  Star,
+  TrendingDown,
+  ExternalLink,
+  QrCode,
+  Info
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import dynamic from "next/dynamic"
+import { MetaMaskConnect } from "@/components/MetaMaskConnect"
+import { blockchainService } from "@/services/blockchainService"
 
 // Dynamically import Leaflet to avoid SSR issues
 const LeafletMap = dynamic(() => import('./LeafletMap'), {
   ssr: false,
   loading: () => (
-    <div className="h-[500px] rounded-lg border border-gray-700 overflow-hidden relative flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
+    <div className="h-[500px] rounded-xl border border-gray-700 overflow-hidden relative flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
       <div className="text-center">
         <Loader2 className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-3" />
         <p className="text-gray-400">Loading interactive map...</p>
@@ -56,11 +69,10 @@ const LeafletMap = dynamic(() => import('./LeafletMap'), {
   )
 })
 
-// Helper function to geocode location (simplified - in production use a real geocoding service)
+// Helper function to geocode location
 const geocodeLocation = async (location: string): Promise<{lat: number, lng: number} | null> => {
   const locationLower = location.toLowerCase()
   
-  // Mock coordinates for Indian cities/states
   const locationMap: {[key: string]: {lat: number, lng: number}} = {
     'mumbai': { lat: 19.0760, lng: 72.8777 },
     'delhi': { lat: 28.6139, lng: 77.2090 },
@@ -96,82 +108,24 @@ const geocodeLocation = async (location: string): Promise<{lat: number, lng: num
     'goa': { lat: 15.2993, lng: 74.1240 },
     'shimla': { lat: 31.1048, lng: 77.1734 },
     'dehradun': { lat: 30.3165, lng: 78.0322 },
-    'srinagar': { lat: 34.0837, lng: 74.7973 },
-    'leh': { lat: 34.1526, lng: 77.5770 },
-    'manali': { lat: 32.2396, lng: 77.1887 },
-    'darjeeling': { lat: 27.0410, lng: 88.2663 },
-    'ooty': { lat: 11.4064, lng: 76.6932 },
-    'kodaikanal': { lat: 10.2381, lng: 77.4892 },
-    'munnar': { lat: 10.0889, lng: 77.0595 },
-    'alleppey': { lat: 9.4981, lng: 76.3388 },
-    'pondicherry': { lat: 11.9139, lng: 79.8145 },
-    'mahabalipuram': { lat: 12.6169, lng: 80.1992 },
-    'hampi': { lat: 15.3350, lng: 76.4600 },
-    'ajanta': { lat: 20.5525, lng: 75.7033 },
-    'ellora': { lat: 20.0268, lng: 75.1771 },
-    'khajuraho': { lat: 24.8318, lng: 79.9199 },
-    'bodh gaya': { lat: 24.6961, lng: 84.9869 },
-    'sarnath': { lat: 25.3762, lng: 83.0227 },
-    'rishikesh': { lat: 30.0869, lng: 78.2676 },
-    'haridwar': { lat: 29.9457, lng: 78.1642 },
-    'mathura': { lat: 27.4924, lng: 77.6737 },
-    'vrindavan': { lat: 27.5811, lng: 77.7006 },
-    'ayodhya': { lat: 26.7921, lng: 82.1990 },
-    'nashik': { lat: 19.9615, lng: 73.7904 },
-    'shirdi': { lat: 19.7666, lng: 74.4770 },
-    'kolhapur': { lat: 16.6913, lng: 74.2445 },
-    'solapur': { lat: 17.6599, lng: 75.9064 },
-    'aurangabad': { lat: 19.8762, lng: 75.3433 },
-    'nanded': { lat: 19.1383, lng: 77.3210 },
-    'latur': { lat: 18.4088, lng: 76.5604 },
-    'jalgaon': { lat: 21.0077, lng: 75.5626 },
-    'dhule': { lat: 20.9042, lng: 74.7749 },
-    'malegaon': { lat: 20.5577, lng: 74.5253 },
-    'akola': { lat: 20.7044, lng: 77.0025 },
-    'amravati': { lat: 20.9374, lng: 77.7796 },
-    'yeotmal': { lat: 20.3888, lng: 78.1204 },
-    'wardha': { lat: 20.7453, lng: 78.6022 },
-    'chandrapur': { lat: 19.9615, lng: 79.2961 },
-    'gadchiroli': { lat: 20.1881, lng: 80.0055 },
-    'gondia': { lat: 21.4669, lng: 80.1920 },
-    'bhandara': { lat: 21.1667, lng: 79.6500 },
-    'nagpur': { lat: 21.1458, lng: 79.0882 },
-    'washim': { lat: 20.1025, lng: 77.1400 },
-    'hingoli': { lat: 19.7167, lng: 77.1500 },
-    'parbhani': { lat: 19.2686, lng: 76.7707 },
-    'jalna': { lat: 19.8410, lng: 75.8864 },
-    'beed': { lat: 18.9891, lng: 75.7684 },
-    'osmanabad': { lat: 18.1855, lng: 76.0391 },
-    'sangli': { lat: 16.8602, lng: 74.5648 },
-    'satara': { lat: 17.6805, lng: 74.0183 },
-    'ratnagiri': { lat: 16.9902, lng: 73.3120 },
-    'sindhudurg': { lat: 16.1667, lng: 73.6833 },
-    'thane': { lat: 19.2183, lng: 72.9781 },
-    'palghar': { lat: 19.6967, lng: 72.7654 },
-    'raigad': { lat: 18.5167, lng: 73.1833 },
-    'nandurbar': { lat: 21.3667, lng: 74.2333 },
-    'buldhana': { lat: 20.5333, lng: 76.1833 }
+    'srinagar': { lat: 34.0837, lng: 74.7973 }
   }
   
-  // Check if any key from locationMap is in the location string
   for (const [key, coords] of Object.entries(locationMap)) {
     if (locationLower.includes(key)) {
       return coords
     }
   }
   
-  // Default to a central location in India if no match
   return { lat: 20.5937, lng: 78.9629 }
 }
 
-// Helper function to extract coordinates from product data - FIXED VERSION
+// Helper function to extract coordinates from product data
 const extractCoordinates = (product: any): {lat: number, lng: number} | null => {
   if (!product) return null
   
-  // Check if product has farm_coordinates (PostGIS POINT format)
   if (product.farm_coordinates && typeof product.farm_coordinates === 'string') {
     try {
-      // Parse PostGIS POINT format: "POINT(lng lat)"
       const match = product.farm_coordinates.match(/POINT\(([^ ]+) ([^)]+)\)/)
       if (match && match[1] && match[2]) {
         return {
@@ -184,38 +138,17 @@ const extractCoordinates = (product: any): {lat: number, lng: number} | null => 
     }
   }
   
-  // Check if coordinates are stored in quality_metrics
   if (product.quality_metrics) {
     try {
-      // First check if it's already an object
       if (typeof product.quality_metrics === 'object' && product.quality_metrics !== null) {
-        // Check if it has location.coordinates
         if (product.quality_metrics.location?.coordinates) {
           const { lat, lng } = product.quality_metrics.location.coordinates
           if (typeof lat === 'number' && typeof lng === 'number') {
             return { lat, lng }
           }
         }
-      } 
-      // If it's a string, try to parse it as JSON
-      else if (typeof product.quality_metrics === 'string') {
-        // Check if it looks like JSON (starts with { or [)
-        const trimmed = product.quality_metrics.trim()
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          const metrics = JSON.parse(product.quality_metrics)
-          if (metrics?.location?.coordinates) {
-            const { lat, lng } = metrics.location.coordinates
-            if (typeof lat === 'number' && typeof lng === 'number') {
-              return { lat, lng }
-            }
-          }
-        }
-        // Otherwise it's just a grade string like "Grade A - Premium Quality", ignore silently
       }
-    } catch (e) {
-      // Silently fail - it's probably just a grade string
-      // Don't log to avoid console spam
-    }
+    } catch (e) {}
   }
   
   return null
@@ -244,31 +177,21 @@ export default function DistributorDashboard() {
   })
   const [mapLoading, setMapLoading] = useState(false)
   
+  // Blockchain states
+  const [walletConnected, setWalletConnected] = useState(false)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  const [blockchainReady, setBlockchainReady] = useState(false)
+  const [blockchainPurchasing, setBlockchainPurchasing] = useState(false)
+  
   const [distributorStats, setDistributorStats] = useState([
-    { 
-      label: "Available Products", 
-      value: "0", 
-      icon: Package,
-      color: "text-blue-400"
-    },
-    { 
-      label: "Purchased Stock", 
-      value: "0T", 
-      icon: Warehouse,
-      color: "text-green-400"
-    },
-    { 
-      label: "Total Spent", 
-      value: "₹0", 
-      icon: DollarSign,
-      color: "text-emerald-400"
-    },
+    { label: "Available Products", value: "0", icon: Package, color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/20" },
+    { label: "Total Purchased", value: "0 q", icon: ShoppingCart, color: "text-green-400", bgColor: "bg-green-500/10", borderColor: "border-green-500/20" },
+    { label: "Total Spent", value: "₹0", icon: DollarSign, color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/20" },
   ])
   
   const router = useRouter()
   const supabase = createClient()
 
-  // State for map markers from actual product locations
   const [mapMarkers, setMapMarkers] = useState<Array<{
     id: string,
     lat: number,
@@ -281,154 +204,121 @@ export default function DistributorDashboard() {
     status: 'available' | 'active',
     quantity: number,
     price: number,
-    hasGPS: boolean
+    hasGPS: boolean,
+    blockchainId?: number
   }>>([])
   const [selectedMarker, setSelectedMarker] = useState<any>(null)
 
-  // Product categories
   const productCategories = [
-    "All",
-    "Cereals",
-    "Pulses",
-    "Vegetables",
-    "Fruits",
-    "Spices",
-    "Oilseeds",
-    "Tubers",
-    "Medicinal Plants",
-    "Flowers",
-    "Other"
+    "All", "Cereals", "Pulses", "Vegetables", "Fruits", "Spices", 
+    "Oilseeds", "Tubers", "Medicinal Plants", "Flowers", "Other"
   ]
 
-  // Check if distributor is verified
-  const isDistributorVerified = () => {
-    return profile?.verified === true
+  const isDistributorVerified = () => profile?.verified === true
+
+  // Handle wallet connection
+  const handleWalletConnected = async (account: string) => {
+    setWalletConnected(true)
+    setWalletAddress(account)
+    const initialized = await blockchainService.init()
+    setBlockchainReady(initialized)
+    
+    if (user) {
+      await supabase
+        .from('profiles')
+        .update({ wallet_address: account })
+        .eq('id', user.id)
+    }
   }
 
-  // Prevent back button after logout
-  useEffect(() => {
-    // Push current state to history
-    window.history.pushState(null, '', window.location.href)
-    
-    // Handle back button
-    const handlePopState = () => {
-      // Check if user is logged in
-      const checkUser = async () => {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          // If not logged in, redirect to login and replace history
-          window.location.replace('/auth/login')
-        } else {
-          // If logged in, push state again to prevent back
-          window.history.pushState(null, '', window.location.href)
-        }
-      }
-      checkUser()
-    }
+  const handleWalletDisconnected = () => {
+    setWalletConnected(false)
+    setWalletAddress(null)
+    setBlockchainReady(false)
+  }
 
-    window.addEventListener('popstate', handlePopState)
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text)
+    alert('Copied to clipboard!')
+  }
 
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
-  }, [supabase.auth])
-
-  // Load product locations from database - using REAL coordinates from farmer registrations
+  // Load product locations
   const loadProductLocations = async () => {
     try {
       setMapLoading(true)
       const markers = []
       
-      console.log('🟡 Loading product locations from database...')
-      console.log('🟡 Total products:', farmerProducts.length)
-      
       for (const product of farmerProducts) {
         if (product?.farm_location && product?.quantity > 0) {
-          // Try to extract real coordinates from the product data
           const coords = extractCoordinates(product)
           
           if (coords) {
-            // Use the real GPS coordinates from farmer registration
             markers.push({
               id: `farm-${product.id}`,
               lat: coords.lat,
               lng: coords.lng,
-              name: product.farm_location || 'Unknown location',
-              productName: product.product_name || 'Unknown product',
+              name: product.farm_location,
+              productName: product.product_name,
               productId: product.id,
-              farmerId: product.farmer_id || '',
-              type: 'farm' as const,
-              status: 'available' as const,
-              quantity: product.quantity || 0,
-              price: product.price_per_quintal || 0,
-              hasGPS: true
+              farmerId: product.farmer_id,
+              type: 'farm',
+              status: 'available',
+              quantity: product.quantity,
+              price: product.price_per_quintal,
+              hasGPS: true,
+              blockchainId: product.blockchain_id
             })
-            console.log(`✅ Added farm marker with GPS: ${product.product_name} at ${coords.lat}, ${coords.lng}`)
           } else {
-            // Fallback: Use approximate location based on city name
-            console.log(`⚠️ Product ${product.product_name} has no GPS coordinates, using approximate location`)
-            
-            try {
-              const approxCoords = await geocodeLocation(product.farm_location)
-              if (approxCoords) {
-                markers.push({
-                  id: `farm-${product.id}`,
-                  lat: approxCoords.lat,
-                  lng: approxCoords.lng,
-                  name: product.farm_location,
-                  productName: product.product_name,
-                  productId: product.id,
-                  farmerId: product.farmer_id || '',
-                  type: 'farm' as const,
-                  status: 'available' as const,
-                  quantity: product.quantity,
-                  price: product.price_per_quintal,
-                  hasGPS: false
-                })
-              }
-            } catch (geoError) {
-              console.error('Geocoding failed for:', product.farm_location, geoError)
+            const approxCoords = await geocodeLocation(product.farm_location)
+            if (approxCoords) {
+              markers.push({
+                id: `farm-${product.id}`,
+                lat: approxCoords.lat,
+                lng: approxCoords.lng,
+                name: product.farm_location,
+                productName: product.product_name,
+                productId: product.id,
+                farmerId: product.farmer_id,
+                type: 'farm',
+                status: 'available',
+                quantity: product.quantity,
+                price: product.price_per_quintal,
+                hasGPS: false,
+                blockchainId: product.blockchain_id
+              })
             }
           }
         }
       }
       
-      // Add warehouse location (distributor's location) - ONLY ONE
       if (profile?.address) {
-        try {
-          const warehouseCoords = await geocodeLocation(profile.address)
-          if (warehouseCoords) {
-            markers.push({
-              id: 'warehouse-main',
-              lat: warehouseCoords.lat,
-              lng: warehouseCoords.lng,
-              name: profile.business_name || 'Your Warehouse',
-              productName: 'Distribution Center',
-              productId: 'warehouse',
-              farmerId: '',
-              type: 'warehouse' as const,
-              status: 'active' as const,
-              quantity: purchasedProducts.reduce((sum, p) => sum + (p.quantity_purchased || p.quantity || 0), 0),
-              price: 0,
-              hasGPS: false
-            })
-          }
-        } catch (warehouseError) {
-          console.error('Error geocoding warehouse location:', warehouseError)
+        const warehouseCoords = await geocodeLocation(profile.address)
+        if (warehouseCoords) {
+          markers.push({
+            id: 'warehouse-main',
+            lat: warehouseCoords.lat,
+            lng: warehouseCoords.lng,
+            name: profile.business_name || 'Your Warehouse',
+            productName: 'Distribution Center',
+            productId: 'warehouse',
+            farmerId: '',
+            type: 'warehouse',
+            status: 'active',
+            quantity: purchasedProducts.reduce((sum, p) => sum + (p.quantity_purchased || 0), 0),
+            price: 0,
+            hasGPS: false
+          })
         }
       }
       
-      console.log(`🟢 Created ${markers.length} map markers (${markers.filter(m => m.hasGPS).length} with GPS)`)
       setMapMarkers(markers)
-      
     } catch (error) {
-      console.error('🔴 Error loading product locations:', error)
+      console.error('Error loading product locations:', error)
     } finally {
       setMapLoading(false)
     }
   }
 
-  // Update markers when products or profile changes
   useEffect(() => {
     if (farmerProducts.length > 0) {
       loadProductLocations()
@@ -436,213 +326,136 @@ export default function DistributorDashboard() {
   }, [farmerProducts, profile])
 
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      localStorage.removeItem('supabase.auth.token')
-    }
-
     const checkAuth = async () => {
       try {
-        sessionStorage.setItem('logout_time', Date.now().toString())
-        
         const { data: { user: authUser } } = await supabase.auth.getUser()
         if (!authUser) {
           router.replace("/auth/login")
           return
         }
         
-        // Get user metadata which should contain the role
         const userRole = authUser.user_metadata?.role || 'distributor'
-        
-        // Only allow distributor role to access this dashboard
         if (userRole !== 'distributor') {
-          console.log('🔴 Unauthorized role:', userRole)
           router.replace("/auth/login")
           return
         }
         
-        setUser({
-          ...authUser,
-          role: userRole
-        })
-        
-        // Now load profile and products
+        setUser({ ...authUser, role: userRole })
         await loadDistributorProfile(authUser.id, userRole)
         await loadFarmerProducts()
         await loadPurchasedProducts(authUser.id)
         
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('wallet_address')
+          .eq('id', authUser.id)
+          .single()
+        
+        if (profileData?.wallet_address) {
+          setWalletAddress(profileData.wallet_address)
+          setWalletConnected(true)
+          await blockchainService.init()
+          setBlockchainReady(true)
+        }
       } catch (error) {
-        console.error('🔴 Auth check error:', error)
+        console.error('Auth error:', error)
         router.replace("/auth/login")
       }
     }
     checkAuth()
-
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload)
-    }
   }, [router, supabase.auth])
 
-  // Load distributor profile
   const loadDistributorProfile = async (userId: string, userRole: string) => {
     try {
       setProfileLoading(true)
-      console.log('🟡 Loading distributor profile for user:', userId)
-
-      const { data: profileData, error: profileError } = await supabase
+      
+      const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single()
 
-      if (profileError) {
-        console.log('🟡 Database profile query error:', profileError.message)
-        
-        if (profileError.code === 'PGRST116') {
-          console.log('🟡 No profile found, creating default')
-          
-          const simpleProfile = {
-            id: userId,
-            email: user?.email || "",
-            role: userRole,
-            phone: "",
-            address: "",
-            business_name: "Distributor Business",
-            verified: false,
-            created_at: new Date().toISOString()
-          }
-          
-          const { data: newProfile, error: insertError } = await supabase
-            .from('profiles')
-            .insert([simpleProfile])
-            .select()
-            .single()
-
-          if (insertError) {
-            console.log('🟡 Could not create profile:', insertError.message)
-            setProfile(simpleProfile)
-            setProfileForm({
-              phone: "",
-              address: "",
-              business_name: "Distributor Business"
-            })
-          } else {
-            console.log('🟢 Profile created:', newProfile)
-            setProfile(newProfile)
-            setProfileForm({
-              phone: newProfile.phone || "",
-              address: newProfile.address || "",
-              business_name: newProfile.business_name || ""
-            })
-          }
-          return
+      if (error || !profileData) {
+        const simpleProfile = {
+          id: userId,
+          email: user?.email || "",
+          role: userRole,
+          phone: "",
+          address: "",
+          business_name: "Distributor Business",
+          verified: false
         }
-      } else if (profileData) {
-        console.log('🟢 Profile loaded:', profileData)
+        
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .insert([simpleProfile])
+          .select()
+          .single()
+        
+        setProfile(newProfile || simpleProfile)
+      } else {
         setProfile(profileData)
         setProfileForm({
           phone: profileData.phone || "",
           address: profileData.address || "",
           business_name: profileData.business_name || ""
         })
-        return
       }
-
     } catch (error) {
-      console.error('🔴 Error loading profile:', error)
+      console.error('Error loading profile:', error)
     } finally {
       setProfileLoading(false)
     }
   }
 
-  // Update profile
   const updateProfile = async () => {
-    if (!user?.id) {
-      console.error('🔴 No user ID available for profile update')
-      return
-    }
+    if (!user?.id) return
 
     try {
       setProfileLoading(true)
-
-      const profileData = {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        phone: profileForm.phone,
-        address: profileForm.address,
-        business_name: profileForm.business_name,
-        verified: profile?.verified || false,
-        updated_at: new Date().toISOString()
-      }
-
-      console.log('🟡 Updating profile with data:', profileData)
-
+      
       const { data: updatedProfile, error } = await supabase
         .from('profiles')
-        .upsert([profileData])
+        .upsert([{
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          phone: profileForm.phone,
+          address: profileForm.address,
+          business_name: profileForm.business_name,
+          verified: profile?.verified || false,
+          wallet_address: walletAddress
+        }])
         .select()
         .single()
 
-      if (error) {
-        console.log('🟡 Database update failed:', error.message)
-        alert('Profile update failed: ' + error.message)
-        return
+      if (!error && updatedProfile) {
+        setProfile(updatedProfile)
+        setIsEditingProfile(false)
+        alert('Profile updated successfully!')
       }
-
-      console.log('🟢 Profile updated in database:', updatedProfile)
-      setProfile(updatedProfile)
-      setIsEditingProfile(false)
-      alert('Profile updated successfully!')
-
     } catch (error) {
-      console.error('🔴 Error updating profile:', error)
-      alert('Failed to update profile')
+      console.error('Error updating profile:', error)
     } finally {
       setProfileLoading(false)
     }
   }
 
-  // Load ALL farmer products from database
   const loadFarmerProducts = async () => {
     try {
       setLoading(true)
-      console.log('🟡 Loading ALL farmer products from database')
-
+      
       const { data: products, error } = await supabase
         .from('products')
         .select('*')
-        .gt('quantity', 0) // Only products with available stock
+        .gt('quantity', 0)
+        .neq('status', 'Sold Out')
         .order('created_at', { ascending: false })
 
-      if (error) {
-        console.error('🔴 Products query error:', error)
-        return
-      }
-
-      if (!products || products.length === 0) {
-        console.log('🟡 No products found')
-        setFarmerProducts([])
-        return
-      }
-
-      console.log('🟢 Successfully loaded farmer products:', products.length)
-      
-      // Log products with GPS coordinates
-      const productsWithGPS = products.filter(p => 
-        p.farm_coordinates || 
-        (p.quality_metrics && 
-         typeof p.quality_metrics === 'object' && 
-         p.quality_metrics.location?.coordinates)
-      )
-      
-      console.log(`🟢 Products with GPS coordinates: ${productsWithGPS.length} of ${products.length}`)
-      
-      setFarmerProducts(products)
-
+      if (error) throw error
+      setFarmerProducts(products || [])
     } catch (error) {
-      console.error('🔴 Critical error loading farmer products:', error)
+      console.error('Error loading products:', error)
     } finally {
       setLoading(false)
     }
@@ -651,150 +464,146 @@ export default function DistributorDashboard() {
   // Load purchased products
   const loadPurchasedProducts = async (distributorId: string) => {
     try {
-      console.log('🟡 Loading purchased products for:', distributorId)
-      
       const { data: purchases, error } = await supabase
         .from('purchases')
-        .select(`
-          *,
-          product:product_id (
-            id,
-            product_name,
-            category,
-            quantity,
-            price_per_quintal,
-            batch_number,
-            farm_location,
-            quality_metrics,
-            status
-          )
-        `)
+        .select('*')
         .eq('distributor_id', distributorId)
         .order('purchased_at', { ascending: false })
 
       if (error) {
-        console.log('🟡 Purchases table query error:', error)
+        console.error('Error loading purchases:', error)
         return
       }
 
-      console.log('🟢 Loaded purchases:', purchases?.length)
-      setPurchasedProducts(purchases || [])
+      const purchasesWithProducts = []
+      for (const purchase of purchases || []) {
+        const { data: product, error: productError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', purchase.product_id)
+          .single()
 
+        if (!productError) {
+          purchasesWithProducts.push({
+            ...purchase,
+            product: product
+          })
+        } else {
+          purchasesWithProducts.push({
+            ...purchase,
+            product: null
+          })
+        }
+      }
+
+      setPurchasedProducts(purchasesWithProducts)
     } catch (error) {
-      console.error('🔴 Error loading purchased products:', error)
+      console.error('Error in loadPurchasedProducts:', error)
     }
   }
 
-  // Update stats
-  useEffect(() => {
-    updateDistributorStats(farmerProducts, purchasedProducts)
-  }, [farmerProducts, purchasedProducts])
-
-  const updateDistributorStats = (products: any[], purchases: any[]) => {
-    const totalAvailableProducts = products.length
-    
-    let totalPurchasedStock = 0
-    let totalSpent = 0
-    
-    purchases.forEach(item => {
-      totalPurchasedStock += item.quantity_purchased || 0
-      totalSpent += item.total_amount || 0
-    })
-
-    setDistributorStats([
-      { 
-        label: "Available Products", 
-        value: totalAvailableProducts.toString(), 
-        icon: Package,
-        color: "text-blue-400"
-      },
-      { 
-        label: "Total Stock", 
-        value: products.reduce((sum, p) => sum + p.quantity, 0) + ' q',
-        icon: Warehouse,
-        color: "text-green-400"
-      },
-      { 
-        label: "Total Spent", 
-        value: totalSpent >= 100000 ? `₹${(totalSpent/100000).toFixed(1)}L` : 
-               totalSpent >= 1000 ? `₹${(totalSpent/1000).toFixed(1)}k` : `₹${totalSpent}`,
-        icon: DollarSign,
-        color: "text-emerald-400"
-      },
-    ])
-  }
-
-  // Purchase product - with verification check
+  // Purchase product - FIXED for full quantity only
   const purchaseProduct = async (product: any) => {
     if (!isDistributorVerified()) {
       alert("❌ You need to be verified by the admin before purchasing products.")
       return
     }
 
-    if (!user?.id) {
-      alert("Please login first")
+    if (!walletConnected || !blockchainReady) {
+      alert("❌ Please connect your MetaMask wallet first")
       return
     }
 
-    if (purchaseQuantity <= 0 || purchaseQuantity > product.quantity) {
-      alert(`Please enter a valid quantity (1-${product.quantity})`)
-      return
-    }
+    // Always purchase the full quantity
+    const quantityToPurchase = product.quantity
 
     try {
+      setBlockchainPurchasing(true)
       setLoading(true)
 
-      // Update product quantity
-      const newQuantity = product.quantity - purchaseQuantity
+      console.log('🟡 Starting purchase...')
+      console.log('Product:', product.product_name)
+      console.log('Full Quantity:', quantityToPurchase)
+
+      // Register purchase on blockchain
+      const blockchainResult = await blockchainService.purchaseProduct(
+        product.blockchain_id || product.id,
+        quantityToPurchase,
+        product.price_per_quintal
+      )
+
+      if (!blockchainResult.success) {
+        throw new Error(blockchainResult.error || 'Blockchain transaction failed')
+      }
+
+      console.log('✅ Blockchain purchase successful:', blockchainResult)
+
+      // Update product to sold out
       const { error: updateError } = await supabase
         .from('products')
         .update({
-          quantity: newQuantity,
-          current_owner: newQuantity > 0 ? 'Farmer/Distributor' : 'Distributor',
-          status: newQuantity > 0 ? 'Partially Purchased' : 'Sold Out'
+          quantity: 0,
+          current_owner: 'Distributor',
+          status: 'Sold Out',
+          blockchain_tx: blockchainResult.transactionHash,
+          blockchain_verified: true
         })
         .eq('id', product.id)
 
       if (updateError) {
-        console.error('🔴 Product update error:', updateError)
-        alert(`Purchase failed: ${updateError.message}`)
-        return
+        console.error('Error updating product:', updateError)
+        throw updateError
       }
 
       // Create purchase record
-      const { error: purchaseError } = await supabase
-        .from('purchases')
-        .insert([{
-          product_id: product.id,
-          distributor_id: user.id,
-          quantity_purchased: purchaseQuantity,
-          price_per_quintal: product.price_per_quintal,
-          total_amount: purchaseQuantity * product.price_per_quintal,
-          status: 'Purchased',
-          purchased_at: new Date().toISOString()
-        }])
-
-      if (purchaseError) {
-        console.log('🟡 Purchase record creation failed:', purchaseError)
+      const purchaseData = {
+        product_id: product.id,
+        distributor_id: user.id,
+        quantity_purchased: quantityToPurchase,
+        price_per_quintal: product.price_per_quintal,
+        total_amount: quantityToPurchase * product.price_per_quintal,
+        status: 'Purchased',
+        purchased_at: new Date().toISOString()
       }
 
-      alert(`✅ Purchase Successful!\nProduct: ${product.product_name}\nQuantity: ${purchaseQuantity} quintals\nTotal: ₹${purchaseQuantity * product.price_per_quintal}`)
+      const { error: purchaseError } = await supabase
+        .from('purchases')
+        .insert([purchaseData])
+
+      if (purchaseError) {
+        console.error('Error creating purchase:', purchaseError)
+        throw purchaseError
+      }
+
+      alert(`✅ Purchase Successful!\n\n` +
+            `Product: ${product.product_name}\n` +
+            `Quantity: ${quantityToPurchase} quintals\n` +
+            `Total: ₹${quantityToPurchase * product.price_per_quintal}\n` +
+            `Transaction: ${blockchainResult.transactionHash?.substring(0, 10)}...`)
       
-      // Reload data
+      // Reload all data
       await loadFarmerProducts()
       await loadPurchasedProducts(user.id)
+      await loadProductLocations()
+      
       setSelectedProduct(null)
       setPurchaseQuantity(1)
 
-    } catch (error) {
-      console.error('🔴 Purchase error:', error)
-      alert("❌ Failed to purchase product")
+    } catch (error: any) {
+      console.error('Purchase error:', error)
+      alert(`❌ Purchase failed: ${error.message || 'Please check console for details'}`)
     } finally {
+      setBlockchainPurchasing(false)
       setLoading(false)
     }
   }
 
-  // Track product
+  // Handle product click - set full quantity
+  const handleProductClick = (product: any) => {
+    setSelectedProduct(product)
+    setPurchaseQuantity(product.quantity) // Set to full quantity
+  }
+
   const trackProductOnBlockchain = async () => {
     if (!trackingId.trim()) {
       alert("Please enter a product ID or batch number")
@@ -805,19 +614,17 @@ export default function DistributorDashboard() {
       setTrackingLoading(true)
       setTrackingResult(null)
       
-      const cleanTrackingId = trackingId.trim()
-      
       const { data: product, error } = await supabase
         .from('products')
         .select('*')
-        .eq('batch_number', cleanTrackingId)
+        .eq('batch_number', trackingId.trim())
         .single()
 
       if (error) {
         const { data: productById } = await supabase
           .from('products')
           .select('*')
-          .eq('id', cleanTrackingId)
+          .eq('id', trackingId.trim())
           .single()
 
         if (productById) {
@@ -828,73 +635,50 @@ export default function DistributorDashboard() {
       } else {
         setTrackingResult(product)
       }
-
     } catch (error) {
-      console.error('🔴 Tracking error:', error)
-      alert(`❌ Error tracking product: ${error}`)
+      console.error('Tracking error:', error)
+      alert(`❌ Error tracking product`)
     } finally {
       setTrackingLoading(false)
     }
   }
 
-  // Filter products
+  const updateDistributorStats = () => {
+    const totalAvailable = farmerProducts.length
+    const totalPurchasedQty = purchasedProducts.reduce((sum, p) => sum + (p.quantity_purchased || 0), 0)
+    const totalSpent = purchasedProducts.reduce((sum, p) => sum + (p.total_amount || 0), 0)
+
+    setDistributorStats([
+      { label: "Available Products", value: totalAvailable.toString(), icon: Package, color: "text-blue-400", bgColor: "bg-blue-500/10", borderColor: "border-blue-500/20" },
+      { label: "Total Purchased", value: totalPurchasedQty + ' q', icon: ShoppingCart, color: "text-green-400", bgColor: "bg-green-500/10", borderColor: "border-green-500/20" },
+      { label: "Total Spent", value: totalSpent >= 100000 ? `₹${(totalSpent/100000).toFixed(1)}L` : `₹${totalSpent.toLocaleString()}`, icon: DollarSign, color: "text-emerald-400", bgColor: "bg-emerald-500/10", borderColor: "border-emerald-500/20" },
+    ])
+  }
+
+  useEffect(() => {
+    updateDistributorStats()
+  }, [farmerProducts, purchasedProducts])
+
   const filteredProducts = farmerProducts.filter(product => {
     if (product.quantity <= 0) return false
-    
     const matchesSearch = searchTerm === "" || 
       product.product_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.farm_location?.toLowerCase().includes(searchTerm.toLowerCase())
-    
     const matchesCategory = selectedCategory === "all" || 
       product.category?.toLowerCase() === selectedCategory.toLowerCase()
-    
     return matchesSearch && matchesCategory
   })
 
   const handleLogout = async () => {
-    try {
-      // Clear all auth-related data
-      await supabase.auth.signOut()
-      
-      // Clear local storage
-      localStorage.removeItem('supabase.auth.token')
-      localStorage.removeItem('supabase.auth.refreshToken')
-      if (user?.id) {
-        localStorage.removeItem(`distributor_profile_${user.id}`)
-      }
-      
-      // Set logout flag in session storage
-      sessionStorage.setItem('logout_time', Date.now().toString())
-      sessionStorage.setItem('logged_out', 'true')
-      
-      // Clear history and redirect - this prevents going back
-      window.location.replace('/auth/login')
-      
-    } catch (error) {
-      console.error('🔴 Logout error:', error)
-      window.location.replace('/auth/login')
-    }
-  }
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return 'Not specified'
-    try {
-      return new Date(dateString).toLocaleDateString('en-IN')
-    } catch {
-      return 'Invalid date'
-    }
+    await supabase.auth.signOut()
+    window.location.replace('/auth/login')
   }
 
   const getQualityGrade = (product: any) => {
-    if (!product.quality_metrics) return null
+    if (!product?.quality_metrics) return null
     try {
       if (typeof product.quality_metrics === 'string') {
-        // If it's a string like "Grade A - Premium Quality", return it directly
-        if (product.quality_metrics.includes('Grade')) {
-          return product.quality_metrics
-        }
-        // Try to parse as JSON
         const metrics = JSON.parse(product.quality_metrics)
         return metrics.grade || null
       }
@@ -904,24 +688,38 @@ export default function DistributorDashboard() {
     }
   }
 
-  // Render verification banner
+  const getGradeColor = (grade: string) => {
+    switch(grade) {
+      case 'A': return 'bg-green-900 text-green-400 border-green-700'
+      case 'B': return 'bg-blue-900 text-blue-400 border-blue-700'
+      case 'C': return 'bg-yellow-900 text-yellow-400 border-yellow-700'
+      case 'D': return 'bg-orange-900 text-orange-400 border-orange-700'
+      case 'Organic': return 'bg-purple-900 text-purple-400 border-purple-700'
+      default: return 'bg-gray-800 text-gray-400 border-gray-700'
+    }
+  }
+
   const renderVerificationBanner = () => {
     if (isDistributorVerified()) {
       return (
-        <div className="bg-green-900/30 border border-green-800 rounded-lg p-4 mb-6 flex items-center gap-3">
-          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
-          <div>
-            <p className="text-green-400 font-medium">✓ Verified Distributor</p>
-            <p className="text-sm text-green-300/70">Your account is verified. You can purchase products.</p>
+        <div className="bg-gradient-to-r from-green-900/30 to-emerald-900/30 border border-green-800 rounded-xl p-5 mb-6 flex items-center gap-4">
+          <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center">
+            <CheckCircle className="h-6 w-6 text-green-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-green-400 font-semibold text-lg">✓ Verified Distributor</p>
+            <p className="text-sm text-green-300/70">Your account is verified. You can now purchase products directly from farmers.</p>
           </div>
         </div>
       )
     } else {
       return (
-        <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg p-4 mb-6 flex items-center gap-3">
-          <Clock className="h-5 w-5 text-yellow-500 flex-shrink-0" />
-          <div>
-            <p className="text-yellow-400 font-medium">⏳ Pending Verification</p>
+        <div className="bg-gradient-to-r from-yellow-900/30 to-orange-900/30 border border-yellow-800 rounded-xl p-5 mb-6 flex items-center gap-4">
+          <div className="w-12 h-12 bg-yellow-500/20 rounded-full flex items-center justify-center">
+            <Clock className="h-6 w-6 text-yellow-500" />
+          </div>
+          <div className="flex-1">
+            <p className="text-yellow-400 font-semibold text-lg">⏳ Pending Verification</p>
             <p className="text-sm text-yellow-300/70">
               Complete your profile and wait for admin approval to purchase products.
             </p>
@@ -934,22 +732,25 @@ export default function DistributorDashboard() {
   const renderRoutesSection = () => {
     return (
       <div className="space-y-6">
-        <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-blue-500" />
-              Farm Locations Map - Real GPS Data
-            </h3>
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-semibold text-white flex items-center gap-2">
+                <MapPin className="h-5 w-5 text-blue-500" />
+                Farm Locations Map
+              </h3>
+              <p className="text-sm text-gray-400 mt-1">Real GPS data from registered farms</p>
+            </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs px-2 py-1 bg-green-900/30 text-green-400 rounded-full flex items-center gap-1">
-                <Map className="h-3 w-3" />
+              <span className="text-sm px-3 py-1.5 bg-blue-900/30 text-blue-400 rounded-full flex items-center gap-2">
+                <MapIcon className="h-3.5 w-3.5" />
                 {mapLoading ? 'Loading...' : `${mapMarkers.length} Locations`}
               </span>
             </div>
           </div>
           
           {mapLoading ? (
-            <div className="h-[500px] rounded-lg border border-gray-700 flex items-center justify-center bg-gray-800">
+            <div className="h-[500px] rounded-xl border border-gray-700 flex items-center justify-center bg-gray-800">
               <div className="text-center">
                 <Loader2 className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-3" />
                 <p className="text-gray-400">Loading farm locations...</p>
@@ -963,77 +764,69 @@ export default function DistributorDashboard() {
             />
           )}
 
-          {/* Map Stats */}
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 bg-gray-800 rounded-lg">
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 bg-gradient-to-br from-green-900/20 to-emerald-900/20 rounded-xl border border-green-800/30">
               <h4 className="font-medium text-white mb-2">Active Farms</h4>
-              <p className="text-2xl font-bold text-green-400">
-                {mapMarkers.filter(m => m.type === 'farm').length}
-              </p>
-              <p className="text-sm text-gray-400">With available products</p>
+              <p className="text-3xl font-bold text-green-400">{mapMarkers.filter(m => m.type === 'farm').length}</p>
+              <p className="text-sm text-gray-400 mt-1">With available products</p>
             </div>
-            <div className="p-4 bg-gray-800 rounded-lg">
+            <div className="p-4 bg-gradient-to-br from-blue-900/20 to-cyan-900/20 rounded-xl border border-blue-800/30">
               <h4 className="font-medium text-white mb-2">GPS Verified</h4>
-              <p className="text-2xl font-bold text-blue-400">
-                {mapMarkers.filter(m => m.hasGPS).length}
-              </p>
-              <p className="text-sm text-gray-400">Exact farm locations</p>
+              <p className="text-3xl font-bold text-blue-400">{mapMarkers.filter(m => m.hasGPS).length}</p>
+              <p className="text-sm text-gray-400 mt-1">Exact farm locations</p>
             </div>
-            <div className="p-4 bg-gray-800 rounded-lg">
-              <h4 className="font-medium text-white mb-2">Total Stock</h4>
-              <p className="text-2xl font-bold text-yellow-400">
-                {farmerProducts.reduce((sum, p) => sum + p.quantity, 0)} q
-              </p>
-              <p className="text-sm text-gray-400">Quintals available</p>
+            <div className="p-4 bg-gradient-to-br from-purple-900/20 to-pink-900/20 rounded-xl border border-purple-800/30">
+              <h4 className="font-medium text-white mb-2">Blockchain Verified</h4>
+              <p className="text-3xl font-bold text-purple-400">{mapMarkers.filter(m => m.blockchainId).length}</p>
+              <p className="text-sm text-gray-400 mt-1">On-chain products</p>
             </div>
           </div>
 
-          {/* Selected Marker Info */}
           {selectedMarker && selectedMarker.type === 'farm' && (
-            <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-blue-500/30">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-white flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-blue-500" />
+            <div className="mt-6 p-5 bg-gradient-to-r from-blue-900/20 to-cyan-900/20 rounded-xl border border-blue-500/30">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="font-semibold text-white text-lg flex items-center gap-2">
+                  <MapPin className="h-5 w-5 text-blue-500" />
                   {selectedMarker.productName}
                 </h4>
                 <div className="flex gap-2">
                   {selectedMarker.hasGPS && (
-                    <span className="text-xs bg-blue-900 text-blue-400 px-2 py-1 rounded-full flex items-center gap-1">
-                      <Crosshair className="h-3 w-3" />
-                      GPS Verified
+                    <span className="text-xs bg-blue-900 text-blue-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                      <Crosshair className="h-3 w-3" /> GPS Verified
+                    </span>
+                  )}
+                  {selectedMarker.blockchainId && (
+                    <span className="text-xs bg-purple-900 text-purple-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                      <Shield className="h-3 w-3" /> Blockchain
                     </span>
                   )}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <div>
-                  <p className="text-gray-400">Location</p>
-                  <p className="text-white">{selectedMarker.name}</p>
+                  <p className="text-gray-400 text-xs">Location</p>
+                  <p className="text-white font-medium mt-1">{selectedMarker.name.substring(0, 50)}</p>
                 </div>
                 <div>
-                  <p className="text-gray-400">Available</p>
-                  <p className="text-white">{selectedMarker.quantity} quintals</p>
+                  <p className="text-gray-400 text-xs">Available Stock</p>
+                  <p className="text-white font-medium mt-1">{selectedMarker.quantity} quintals</p>
                 </div>
                 <div>
-                  <p className="text-gray-400">Price</p>
-                  <p className="text-white">₹{selectedMarker.price}/quintal</p>
+                  <p className="text-gray-400 text-xs">Price per Quintal</p>
+                  <p className="text-white font-medium mt-1">₹{selectedMarker.price}</p>
                 </div>
-                {selectedMarker.hasGPS && (
-                  <div>
-                    <p className="text-gray-400">Coordinates</p>
-                    <p className="text-white text-xs">
-                      {selectedMarker.lat.toFixed(6)}, {selectedMarker.lng.toFixed(6)}
-                    </p>
-                  </div>
-                )}
+                <div>
+                  <p className="text-gray-400 text-xs">Total Value</p>
+                  <p className="text-white font-medium mt-1">₹{selectedMarker.quantity * selectedMarker.price}</p>
+                </div>
               </div>
-              {isDistributorVerified() && (
+              {isDistributorVerified() && walletConnected && (
                 <Button
                   onClick={() => {
                     const product = farmerProducts.find(p => p.id === selectedMarker.productId)
-                    if (product) setSelectedProduct(product)
+                    if (product) handleProductClick(product)
                   }}
-                  className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white"
+                  className="mt-5 w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white shadow-lg"
                 >
                   <ShoppingCart className="h-4 w-4 mr-2" />
                   Purchase from this Farm
@@ -1042,20 +835,23 @@ export default function DistributorDashboard() {
             </div>
           )}
 
-          {/* Map Legend */}
-          <div className="mt-6 p-4 bg-gray-800/50 rounded-lg">
+          <div className="mt-6 p-4 bg-gray-800/50 rounded-xl">
             <h5 className="font-medium text-white mb-3">Map Legend</h5>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-sm text-gray-300">Farm (GPS Verified)</span>
+                <div className="w-3 h-3 bg-green-500 rounded-full shadow-lg"></div>
+                <span className="text-sm text-gray-300">Farm (GPS)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                <div className="w-3 h-3 bg-yellow-500 rounded-full shadow-lg"></div>
                 <span className="text-sm text-gray-300">Farm (Approx)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                <div className="w-3 h-3 bg-purple-500 rounded-full shadow-lg"></div>
+                <span className="text-sm text-gray-300">Blockchain Verified</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-blue-500 rounded-full shadow-lg"></div>
                 <span className="text-sm text-gray-300">Your Warehouse</span>
               </div>
             </div>
@@ -1068,10 +864,7 @@ export default function DistributorDashboard() {
   if (!user) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-          <p className="mt-4 text-gray-400">Loading dashboard...</p>
-        </div>
+        <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
       </div>
     )
   }
@@ -1079,21 +872,21 @@ export default function DistributorDashboard() {
   return (
     <div className="min-h-screen bg-black flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-gray-900 border-r border-gray-800">
+      <aside className="w-64 bg-gradient-to-b from-gray-900 to-gray-950 border-r border-gray-800 flex flex-col">
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg flex items-center justify-center">
-              <Truck className="h-6 w-6 text-white" />
+            <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center shadow-lg">
+              <Truck className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-white">KrishiSetu</h1>
-              <p className="text-sm text-gray-400">Distributor Panel</p>
+              <h1 className="text-lg font-bold text-white">KrishiSetu</h1>
+              <p className="text-xs text-gray-400">Distributor Panel</p>
             </div>
           </div>
         </div>
         
-        <nav className="p-4">
-          <div className="space-y-2">
+        <nav className="p-4 flex-1">
+          <div className="space-y-1">
             {[
               { id: "dashboard", label: "Dashboard", icon: BarChart3 },
               { id: "marketplace", label: "Farm Products", icon: Package },
@@ -1106,9 +899,9 @@ export default function DistributorDashboard() {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm font-medium transition-all ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                   activeTab === item.id
-                    ? "bg-blue-600 text-white shadow-sm"
+                    ? "bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-lg"
                     : "text-gray-400 hover:text-white hover:bg-gray-800"
                 }`}
               >
@@ -1119,85 +912,67 @@ export default function DistributorDashboard() {
           </div>
         </nav>
 
+        {/* MetaMask Connect */}
+        <div className="p-4 border-t border-gray-800">
+          <MetaMaskConnect 
+            onConnected={handleWalletConnected}
+            onDisconnected={handleWalletDisconnected}
+            showBalance={true}
+          />
+          
+          {walletConnected && walletAddress && (
+            <div className="mt-3 p-3 bg-gradient-to-r from-blue-900/20 to-cyan-900/20 border border-blue-800 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <ShieldCheck className="h-4 w-4 text-blue-500" />
+                <span className="text-xs font-medium text-blue-400">Blockchain Ready</span>
+              </div>
+              <p className="text-xs text-gray-400 truncate font-mono">{walletAddress.substring(0, 10)}...{walletAddress.substring(38)}</p>
+            </div>
+          )}
+        </div>
+
         {/* Profile Section */}
         <div className="p-4 border-t border-gray-800">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-400 flex items-center gap-2">
-              <User className="h-4 w-4" />
-              Profile
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+              <User className="h-3 w-3" /> Profile
             </h3>
-            <button
-              onClick={() => setIsEditingProfile(!isEditingProfile)}
-              className="text-gray-500 hover:text-white"
-              disabled={profileLoading}
-            >
+            <button onClick={() => setIsEditingProfile(!isEditingProfile)} className="text-gray-500 hover:text-white transition-colors">
               {isEditingProfile ? <X className="h-4 w-4" /> : <Edit className="h-4 w-4" />}
             </button>
           </div>
 
-          {profileLoading ? (
-            <div className="text-center py-4">
-              <Loader2 className="h-4 w-4 animate-spin text-blue-500 mx-auto" />
-            </div>
-          ) : isEditingProfile ? (
+          {isEditingProfile ? (
             <div className="space-y-3">
-              <input
-                type="text"
-                value={profileForm.business_name}
-                onChange={(e) => setProfileForm(prev => ({ ...prev, business_name: e.target.value }))}
-                placeholder="Business Name"
-                className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded text-white"
-              />
-              <input
-                type="text"
-                value={profileForm.phone}
-                onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="Phone"
-                className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded text-white"
-              />
-              <textarea
-                value={profileForm.address}
-                onChange={(e) => setProfileForm(prev => ({ ...prev, address: e.target.value }))}
-                placeholder="Address"
-                rows={2}
-                className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded text-white"
-              />
-              <Button onClick={updateProfile} size="sm" className="w-full bg-blue-600">
-                <Save className="h-3 w-3 mr-1" /> Save
-              </Button>
+              <input type="text" value={profileForm.business_name} onChange={(e) => setProfileForm(prev => ({ ...prev, business_name: e.target.value }))} placeholder="Business Name" className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500" />
+              <input type="text" value={profileForm.phone} onChange={(e) => setProfileForm(prev => ({ ...prev, phone: e.target.value }))} placeholder="Phone" className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500" />
+              <textarea value={profileForm.address} onChange={(e) => setProfileForm(prev => ({ ...prev, address: e.target.value }))} placeholder="Address" rows={2} className="w-full p-2 text-sm bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-blue-500" />
+              <Button onClick={updateProfile} size="sm" className="w-full bg-gradient-to-r from-blue-600 to-cyan-600"><Save className="h-3 w-3 mr-1" /> Save Changes</Button>
             </div>
           ) : (
-            <div className="space-y-2 text-sm">
-              <p className="text-white truncate">{profile?.business_name || user?.email}</p>
-              {profile?.phone && <p className="text-gray-400">{profile.phone}</p>}
-              <div className="flex items-center gap-2">
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  profile?.verified ? 'bg-green-900 text-green-400' : 'bg-yellow-900 text-yellow-400'
-                }`}>
-                  {profile?.verified ? 'Verified' : 'Pending'}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-white truncate">{profile?.business_name || user?.email?.split('@')[0] || 'Distributor'}</p>
+              {profile?.phone && <p className="text-xs text-gray-400 flex items-center gap-1"><Phone className="h-3 w-3" /> {profile.phone}</p>}
+              <div className="flex items-center gap-2 pt-1">
+                <span className={`text-xs px-2 py-1 rounded-full ${profile?.verified ? 'bg-green-900 text-green-400' : 'bg-yellow-900 text-yellow-400'}`}>
+                  {profile?.verified ? '✓ Verified' : '⏳ Pending'}
                 </span>
               </div>
             </div>
           )}
         </div>
 
-        {/* User Section with Logout Button */}
-        <div className="p-4 border-t border-gray-800 mt-4">
-          <div className="flex items-center gap-3 p-3">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-medium">
-              <User className="h-4 w-4" />
+        {/* User Section with Logout */}
+        <div className="p-4 border-t border-gray-800">
+          <div className="flex items-center gap-3 p-2">
+            <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-full flex items-center justify-center shadow-lg">
+              <User className="h-4 w-4 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">
-                {profile?.business_name || user?.email || 'Distributor'}
-              </p>
-              <p className="text-xs text-gray-400 capitalize">{user?.role || profile?.role || 'distributor'} Account</p>
+              <p className="text-sm font-medium text-white truncate">{profile?.business_name || 'Distributor'}</p>
+              <p className="text-xs text-gray-400">Distributor Account</p>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-              title="Logout"
-            >
+            <button onClick={handleLogout} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all">
               <LogOut className="h-4 w-4" />
             </button>
           </div>
@@ -1206,220 +981,255 @@ export default function DistributorDashboard() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        <header className="bg-gray-900 border-b border-gray-800">
-          <div className="px-6 py-4 flex justify-between items-center">
-            <div>
-              <h1 className="text-xl font-bold text-white">
-                {activeTab === "dashboard" && "Dashboard"}
-                {activeTab === "marketplace" && "Farm Products"}
-                {activeTab === "my-purchases" && "My Purchases"}
-                {activeTab === "tracking" && "Tracking"}
-                {activeTab === "routes" && "Farm Locations"}
-                {activeTab === "retailers" && "Retailers"}
-                {activeTab === "revenue" && "Revenue"}
-              </h1>
-              <p className="text-sm text-gray-400">
-                {farmerProducts.length} products available • {mapMarkers.filter(m => m.hasGPS).length} GPS verified locations
-              </p>
-            </div>
-          </div>
+        <header className="bg-gradient-to-r from-gray-900 to-gray-950 border-b border-gray-800 px-8 py-5">
+          <h1 className="text-2xl font-bold text-white">
+            {activeTab === "dashboard" && "Dashboard Overview"}
+            {activeTab === "marketplace" && "Farm Products Marketplace"}
+            {activeTab === "my-purchases" && "My Purchases History"}
+            {activeTab === "tracking" && "Product Tracking"}
+            {activeTab === "routes" && "Farm Locations Map"}
+            {activeTab === "retailers" && "Retailer Network"}
+            {activeTab === "revenue" && "Revenue Analytics"}
+          </h1>
+          <p className="text-sm text-gray-400 mt-1">
+            {activeTab === "dashboard" && "Welcome back! Here's your distribution overview"}
+            {activeTab === "marketplace" && `${farmerProducts.length} products available from verified farmers`}
+            {activeTab === "my-purchases" && `${purchasedProducts.length} purchases made`}
+            {activeTab === "tracking" && "Track product authenticity on blockchain"}
+            {activeTab === "routes" && `${mapMarkers.filter(m => m.hasGPS).length} GPS verified farm locations`}
+          </p>
         </header>
 
-        <main className="flex-1 p-6 bg-black">
-          {loading && <div className="fixed top-0 left-0 w-full h-1 bg-blue-500 z-50 animate-pulse" />}
-
-          {/* Verification Banner */}
+        <main className="flex-1 p-8 bg-gradient-to-b from-black to-gray-950 overflow-y-auto">
+          {loading && <div className="fixed top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500 z-50 animate-pulse" />}
           {renderVerificationBanner()}
+
+          {/* Wallet Warning */}
+          {!walletConnected && activeTab === "marketplace" && (
+            <div className="mb-6 p-4 bg-gradient-to-r from-orange-900/30 to-red-900/30 border border-orange-800 rounded-xl">
+              <div className="flex items-center gap-3">
+                <Wallet className="h-5 w-5 text-orange-500" />
+                <div className="flex-1">
+                  <p className="text-orange-400 font-medium">Connect MetaMask to purchase products on blockchain</p>
+                  <p className="text-sm text-orange-300/70">Blockchain integration ensures transparent and secure transactions</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {activeTab === "dashboard" && (
             <div className="space-y-6">
-              {/* Stats */}
+              {/* Stats Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {distributorStats.map((stat, index) => (
-                  <div key={index} className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-                    <div className="flex justify-between">
+                  <div key={index} className={`${stat.bgColor} ${stat.borderColor} border rounded-xl p-6 transition-all hover:scale-105 duration-300`}>
+                    <div className="flex justify-between items-start">
                       <div>
-                        <p className="text-sm text-gray-400">{stat.label}</p>
-                        <p className="text-2xl font-bold text-white mt-1">{stat.value}</p>
+                        <p className="text-sm text-gray-400 mb-1">{stat.label}</p>
+                        <p className="text-3xl font-bold text-white">{stat.value}</p>
                       </div>
-                      <stat.icon className={`h-6 w-6 ${stat.color}`} />
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${stat.bgColor} border ${stat.borderColor}`}>
+                        <stat.icon className={`h-6 w-6 ${stat.color}`} />
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              {/* Products List */}
-              <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">
-                  Available Products ({farmerProducts.length})
-                </h3>
-                {farmerProducts.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No products available</p>
+              {/* Recent Products Section */}
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Recent Products</h3>
+                    <p className="text-sm text-gray-400 mt-1">Latest additions from farmers</p>
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {farmerProducts.slice(0, 5).map((product) => {
-                      const hasGPS = extractCoordinates(product) !== null
-                      return (
-                        <div key={product.id} className="p-3 bg-gray-800 rounded-lg">
-                          <div className="flex justify-between">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-medium text-white">{product.product_name}</p>
-                                {hasGPS && (
-                                  <span className="text-xs bg-blue-900 text-blue-400 px-2 py-0.5 rounded-full">
-                                    GPS
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-400">
-                                {product.quantity} q • ₹{product.price_per_quintal}/q
-                              </p>
-                              <p className="text-xs text-gray-500">{product.farm_location}</p>
-                            </div>
-                            <button
-                              onClick={() => setSelectedProduct(product)}
-                              disabled={!isDistributorVerified()}
-                              className={`px-3 py-1 rounded text-sm ${
-                                isDistributorVerified() 
-                                  ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                                  : 'bg-gray-600 text-gray-300 cursor-not-allowed'
-                              }`}
-                            >
-                              Buy
-                            </button>
+                  <button onClick={() => setActiveTab("marketplace")} className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">View all <ExternalLink className="h-3 w-3" /></button>
+                </div>
+                
+                {farmerProducts.slice(0, 5).map((product, idx) => {
+                  const qualityGrade = getQualityGrade(product)
+                  const hasGPS = extractCoordinates(product) !== null
+                  return (
+                    <div key={product.id} className={`p-4 bg-gray-800/50 rounded-lg mb-3 transition-all hover:bg-gray-800 border border-gray-700/50 ${idx === 0 ? 'border-l-4 border-l-blue-500' : ''}`}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <p className="font-semibold text-white">{product.product_name}</p>
+                            {product.blockchain_verified && <span className="text-xs bg-purple-900/50 text-purple-400 px-2 py-0.5 rounded-full flex items-center gap-1 border border-purple-700"><Shield className="h-3 w-3" /> Blockchain</span>}
+                            {hasGPS && <span className="text-xs bg-blue-900/50 text-blue-400 px-2 py-0.5 rounded-full flex items-center gap-1 border border-blue-700"><Crosshair className="h-3 w-3" /> GPS</span>}
                           </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div><p className="text-gray-500 text-xs">Category</p><p className="text-gray-300">{product.category}</p></div>
+                            <div><p className="text-gray-500 text-xs">Quantity</p><p className="text-gray-300">{product.quantity} quintals</p></div>
+                            <div><p className="text-gray-500 text-xs">Price</p><p className="text-gray-300">₹{product.price_per_quintal}/q</p></div>
+                            <div><p className="text-gray-500 text-xs">Location</p><p className="text-gray-300 text-xs">{product.farm_location?.substring(0, 30)}</p></div>
+                          </div>
+                          {qualityGrade && (
+                            <div className="mt-2">
+                              <span className={`text-xs px-2 py-1 rounded-full border ${getGradeColor(qualityGrade)}`}>
+                                <Award className="h-3 w-3 inline mr-1" /> Grade {qualityGrade}
+                              </span>
+                            </div>
+                          )}
                         </div>
-                      )
-                    })}
+                        <div className="ml-4">
+                          <p className="text-lg font-bold text-white mb-2">₹{(product.quantity * product.price_per_quintal).toLocaleString()}</p>
+                          <Button onClick={() => handleProductClick(product)} disabled={!isDistributorVerified() || !walletConnected} className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white px-4 py-2 text-sm">
+                            {!walletConnected ? 'Connect Wallet' : !isDistributorVerified() ? 'Verification Pending' : 'Purchase Now'}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+                
+                {farmerProducts.length === 0 && (
+                  <div className="text-center py-12">
+                    <Package className="h-16 w-16 text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-400">No products available at the moment</p>
                   </div>
                 )}
+              </div>
+
+              {/* Quick Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                  <h3 className="font-semibold text-white mb-4 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-green-400" /> Recent Purchases</h3>
+                  {purchasedProducts.slice(0, 3).map((purchase) => (
+                    <div key={purchase.id} className="flex justify-between items-center py-2 border-b border-gray-800 last:border-0">
+                      <div><p className="text-white text-sm">{purchase.product?.product_name || 'Product'}</p><p className="text-xs text-gray-500">{new Date(purchase.purchased_at).toLocaleDateString()}</p></div>
+                      <p className="text-white font-semibold">₹{purchase.total_amount?.toLocaleString()}</p>
+                    </div>
+                  ))}
+                  {purchasedProducts.length === 0 && <p className="text-gray-500 text-center py-4">No purchases yet</p>}
+                </div>
+                
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                  <h3 className="font-semibold text-white mb-4 flex items-center gap-2"><MapPin className="h-4 w-4 text-blue-400" /> Top Sourcing Locations</h3>
+                  {(() => {
+                    const uniqueLocations: {[key: string]: any} = {};
+                    farmerProducts.forEach(product => {
+                      if (product.farm_location && !uniqueLocations[product.farm_location]) {
+                        uniqueLocations[product.farm_location] = product;
+                      }
+                    });
+                    const locationList = Object.entries(uniqueLocations).slice(0, 3);
+                    return locationList.map(([location, product]: [string, any]) => (
+                      <div key={location} className="flex justify-between items-center py-2 border-b border-gray-800 last:border-0">
+                        <p className="text-white text-sm">{location?.substring(0, 30)}</p>
+                        <p className="text-blue-400 text-sm">{product.quantity} q available</p>
+                      </div>
+                    ));
+                  })()}
+                </div>
               </div>
             </div>
           )}
 
           {activeTab === "marketplace" && (
             <div className="space-y-6">
-              {/* Search and Filter */}
-              <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-                <div className="flex gap-4 mb-6">
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                <div className="flex flex-col md:flex-row gap-4 mb-6">
                   <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                    <input
-                      type="text"
-                      placeholder="Search products..."
-                      className="w-full pl-10 p-3 bg-gray-800 border border-gray-700 rounded-lg text-white"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+                    <Search className="absolute left-3 top-3 h-5 w-5 text-gray-500" />
+                    <input type="text" placeholder="Search products..." className="w-full pl-10 pr-4 p-3 bg-gray-800 border border-gray-700 rounded-xl text-white" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                   </div>
-                  <select
-                    className="p-3 bg-gray-800 border border-gray-700 rounded-lg text-white"
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                  >
-                    {productCategories.map(cat => (
-                      <option key={cat} value={cat.toLowerCase()}>{cat}</option>
-                    ))}
+                  <select className="p-3 bg-gray-800 border border-gray-700 rounded-xl text-white" value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+                    {productCategories.map(cat => <option key={cat} value={cat.toLowerCase()}>{cat}</option>)}
                   </select>
                 </div>
 
-                {/* Verification warning for unverified distributors */}
                 {!isDistributorVerified() && (
-                  <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <AlertCircle className="h-5 w-5 text-yellow-500 flex-shrink-0" />
-                      <div>
-                        <p className="text-yellow-400 font-medium">Verification Required</p>
-                        <p className="text-sm text-yellow-300/70">
-                          You need to be verified by the admin before you can purchase products.
-                        </p>
-                      </div>
-                    </div>
+                  <div className="mb-6 p-4 bg-yellow-900/20 border border-yellow-800 rounded-xl">
+                    <div className="flex items-center gap-3"><AlertCircle className="h-5 w-5 text-yellow-500" /><div><p className="text-yellow-400 font-medium">Verification Required</p></div></div>
                   </div>
                 )}
 
-                {/* Products Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredProducts.map((product) => {
                     const qualityGrade = getQualityGrade(product)
                     const hasGPS = extractCoordinates(product) !== null
-                    
                     return (
-                      <div key={product.id} className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="font-semibold text-white">{product.product_name}</h3>
-                          {hasGPS && (
-                            <span className="text-xs bg-blue-900 text-blue-400 px-2 py-1 rounded-full flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              GPS
-                            </span>
-                          )}
+                      <div key={product.id} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden hover:border-blue-500/50 transition-all">
+                        <div className="p-5">
+                          <h3 className="font-semibold text-white text-lg mb-2">{product.product_name}</h3>
+                          <div className="space-y-2 mb-4">
+                            <p className="text-sm text-gray-400"><span className="text-gray-500">Category:</span> {product.category}</p>
+                            <p className="text-sm text-gray-400"><span className="text-gray-500">Quantity:</span> {product.quantity} quintals</p>
+                            <p className="text-sm text-gray-400"><span className="text-gray-500">Price:</span> <span className="text-green-400 font-bold">₹{product.price_per_quintal}/q</span></p>
+                            <p className="text-sm text-gray-400"><span className="text-gray-500">Location:</span> {product.farm_location?.substring(0, 30)}</p>
+                          </div>
+                          <div className="flex gap-2 mb-4">
+                            {qualityGrade && <span className={`text-xs px-2 py-1 rounded-full border ${getGradeColor(qualityGrade)}`}><Award className="h-3 w-3 inline mr-1" /> Grade {qualityGrade}</span>}
+                            {hasGPS && <span className="text-xs bg-blue-900 text-blue-400 px-2 py-1 rounded-full flex items-center gap-1"><Crosshair className="h-3 w-3" /> GPS</span>}
+                            {product.blockchain_verified && <span className="text-xs bg-purple-900 text-purple-400 px-2 py-1 rounded-full flex items-center gap-1"><Shield className="h-3 w-3" /> Blockchain</span>}
+                          </div>
+                          <Button onClick={() => handleProductClick(product)} className={`w-full ${isDistributorVerified() && walletConnected ? 'bg-gradient-to-r from-blue-600 to-cyan-600' : 'bg-gray-600 cursor-not-allowed'} text-white py-2.5`} disabled={!isDistributorVerified() || !walletConnected}>
+                            {!walletConnected ? <><Wallet className="h-4 w-4 mr-2" /> Connect Wallet</> : !isDistributorVerified() ? <><Clock className="h-4 w-4 mr-2" /> Verification Required</> : <><ShoppingCart className="h-4 w-4 mr-2" /> Purchase</>}
+                          </Button>
                         </div>
-                        <p className="text-sm text-gray-400 mb-1">Category: {product.category}</p>
-                        <p className="text-sm text-gray-400 mb-1">Quantity: {product.quantity} q</p>
-                        <p className="text-sm text-gray-400 mb-1">Price: ₹{product.price_per_quintal}/q</p>
-                        <p className="text-sm text-gray-400 mb-3">Location: {product.farm_location}</p>
-                        {qualityGrade && (
-                          <span className="text-xs px-2 py-1 bg-green-900 text-green-400 rounded-full">
-                            {qualityGrade}
-                          </span>
-                        )}
-                        <Button
-                          onClick={() => setSelectedProduct(product)}
-                          className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white"
-                          disabled={!isDistributorVerified()}
-                        >
-                          {!isDistributorVerified() ? 'Verification Required' : 'Purchase'}
-                        </Button>
                       </div>
                     )
                   })}
                 </div>
-
+                
                 {filteredProducts.length === 0 && (
-                  <p className="text-center text-gray-500 py-8">No products found</p>
+                  <div className="text-center py-12"><Package className="h-16 w-16 text-gray-600 mx-auto mb-4" /><p className="text-gray-400">No products found</p></div>
                 )}
               </div>
 
-              {/* Purchase Modal */}
+              {/* Purchase Modal - FIXED for full quantity only */}
               {selectedProduct && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                  <div className="bg-gray-900 rounded-lg p-6 max-w-md w-full">
-                    <h3 className="text-lg font-semibold text-white mb-4">Purchase {selectedProduct.product_name}</h3>
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                  <div className="bg-gradient-to-b from-gray-900 to-gray-950 rounded-xl border border-gray-700 max-w-md w-full p-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-xl font-bold text-white">Purchase {selectedProduct.product_name}</h3>
+                      <button onClick={() => setSelectedProduct(null)} className="text-gray-400 hover:text-white"><X className="h-5 w-5" /></button>
+                    </div>
                     <div className="space-y-4">
-                      <p className="text-gray-400">Available: {selectedProduct.quantity} quintals</p>
-                      <p className="text-gray-400">Price: ₹{selectedProduct.price_per_quintal}/quintal</p>
-                      <div>
-                        <label className="text-sm text-gray-400">Quantity (quintals)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={selectedProduct.quantity}
-                          value={purchaseQuantity}
-                          onChange={(e) => setPurchaseQuantity(Number(e.target.value))}
-                          className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg text-white mt-1"
-                        />
+                      <div className="p-3 bg-gray-800 rounded-lg">
+                        <p className="text-sm text-gray-400">Available Stock</p>
+                        <p className="text-2xl font-bold text-white">{selectedProduct.quantity} quintals</p>
                       </div>
-                      <p className="text-xl font-bold text-white">
-                        Total: ₹{purchaseQuantity * selectedProduct.price_per_quintal}
-                      </p>
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => purchaseProduct(selectedProduct)}
-                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                          disabled={loading}
-                        >
-                          {loading ? 'Processing...' : 'Confirm Purchase'}
+                      <div className="p-3 bg-gray-800 rounded-lg">
+                        <p className="text-sm text-gray-400">Price per Quintal</p>
+                        <p className="text-2xl font-bold text-green-400">₹{selectedProduct.price_per_quintal}</p>
+                      </div>
+                      
+                      {/* Fixed quantity display - full purchase only */}
+                      <div>
+                        <label className="text-sm text-gray-400 block mb-2">Quantity (quintals)</label>
+                        <input 
+                          type="number" 
+                          value={selectedProduct.quantity} 
+                          disabled
+                          className="w-full p-3 bg-gray-800 border border-gray-700 rounded-lg text-white opacity-75"
+                        />
+                        <div className="mt-2 p-2 bg-blue-900/20 rounded-lg border border-blue-800">
+                          <p className="text-xs text-blue-400 flex items-center gap-1">
+                            <Info className="h-3 w-3" />
+                            This product must be purchased in full quantity ({selectedProduct.quantity} quintals)
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="p-3 bg-gradient-to-r from-blue-900/20 to-cyan-900/20 rounded-lg">
+                        <p className="text-sm text-gray-400">Total Amount</p>
+                        <p className="text-3xl font-bold text-white">₹{(selectedProduct.quantity * selectedProduct.price_per_quintal).toLocaleString()}</p>
+                      </div>
+                      
+                      {selectedProduct.blockchain_verified && (
+                        <div className="flex items-center gap-2 p-2 bg-purple-900/20 rounded-lg border border-purple-800">
+                          <Shield className="h-4 w-4 text-purple-400" />
+                          <p className="text-xs text-purple-400">This product is blockchain verified</p>
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-3 pt-2">
+                        <Button onClick={() => purchaseProduct(selectedProduct)} className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white py-2.5" disabled={blockchainPurchasing}>
+                          {blockchainPurchasing ? <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...</> : <><Shield className="h-4 w-4 mr-2" /> Confirm Purchase</>}
                         </Button>
-                        <Button
-                          onClick={() => setSelectedProduct(null)}
-                          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white"
-                        >
-                          Cancel
-                        </Button>
+                        <Button onClick={() => setSelectedProduct(null)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2.5">Cancel</Button>
                       </div>
                     </div>
                   </div>
@@ -1429,21 +1239,38 @@ export default function DistributorDashboard() {
           )}
 
           {activeTab === "my-purchases" && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">My Purchases</h3>
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+              <div className="flex justify-between items-center mb-6">
+                <div><h3 className="text-lg font-semibold text-white">Purchase History</h3><p className="text-sm text-gray-400 mt-1">All your verified purchases</p></div>
+                <span className="text-sm px-3 py-1.5 bg-green-900/30 text-green-400 rounded-full">{purchasedProducts.length} Total Purchases</span>
+              </div>
+              
               {purchasedProducts.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No purchases yet</p>
+                <div className="text-center py-12"><ShoppingCart className="h-16 w-16 text-gray-600 mx-auto mb-4" /><p className="text-gray-400">No purchases yet</p><Button onClick={() => setActiveTab("marketplace")} className="mt-4 bg-blue-600 text-white">Browse Products</Button></div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {purchasedProducts.map((item) => (
-                    <div key={item.id} className="p-4 bg-gray-800 rounded-lg">
-                      <p className="font-medium text-white">{item.product?.product_name}</p>
-                      <p className="text-sm text-gray-400">
-                        {item.quantity_purchased} q • ₹{item.total_amount}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {new Date(item.purchased_at).toLocaleDateString()}
-                      </p>
+                    <div key={item.id} className="p-5 bg-gray-800 rounded-xl border border-gray-700 hover:border-blue-500/30 transition-all">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="font-semibold text-white text-lg">{item.product?.product_name || 'Product'}</p>
+                            {item.product?.blockchain_verified && <span className="text-xs bg-purple-900 text-purple-400 px-2 py-0.5 rounded-full flex items-center gap-1"><Shield className="h-3 w-3" /> Blockchain</span>}
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3">
+                            <div><p className="text-gray-500 text-xs">Quantity</p><p className="text-white font-medium">{item.quantity_purchased} quintals</p></div>
+                            <div><p className="text-gray-500 text-xs">Price per Quintal</p><p className="text-white font-medium">₹{item.price_per_quintal}</p></div>
+                            <div><p className="text-gray-500 text-xs">Total Amount</p><p className="text-green-400 font-bold">₹{item.total_amount?.toLocaleString()}</p></div>
+                            <div><p className="text-gray-500 text-xs">Purchase Date</p><p className="text-white font-medium">{new Date(item.purchased_at).toLocaleDateString()}</p></div>
+                          </div>
+                          {item.product?.blockchain_tx && (
+                            <p className="text-xs text-gray-500 mt-3 flex items-center gap-1"><Shield className="h-3 w-3 text-purple-400" /> TX: {item.product.blockchain_tx.substring(0, 20)}...</p>
+                          )}
+                        </div>
+                        {item.product?.blockchain_tx && (
+                          <button onClick={() => copyToClipboard(item.product.blockchain_tx)} className="ml-4 text-xs bg-purple-900/50 text-purple-400 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-purple-800/50"><Copy className="h-3 w-3" /> TX Hash</button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1452,47 +1279,44 @@ export default function DistributorDashboard() {
           )}
 
           {activeTab === "tracking" && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">Track Product</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Enter Batch Number or Product ID"
-                  className="flex-1 p-3 bg-gray-800 border border-gray-700 rounded-lg text-white"
-                  value={trackingId}
-                  onChange={(e) => setTrackingId(e.target.value)}
-                />
-                <Button onClick={trackProductOnBlockchain} className="bg-blue-600 text-white">
-                  Track
-                </Button>
-              </div>
-              {trackingResult && (
-                <div className="mt-6 p-4 bg-gray-800 rounded-lg">
-                  <h4 className="font-semibold text-white mb-3">Product Details</h4>
-                  <p className="text-gray-400">Name: {trackingResult.product_name}</p>
-                  <p className="text-gray-400">Batch: {trackingResult.batch_number}</p>
-                  <p className="text-gray-400">Owner: {trackingResult.current_owner}</p>
-                  <p className="text-gray-400">Status: {trackingResult.status}</p>
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+              <div className="max-w-2xl mx-auto">
+                <h3 className="text-lg font-semibold text-white text-center mb-2">Track Product Authenticity</h3>
+                <p className="text-sm text-gray-400 text-center mb-6">Enter batch number or product ID to verify on blockchain</p>
+                <div className="flex gap-3 mb-6">
+                  <input type="text" placeholder="Enter Batch Number or Product ID" className="flex-1 p-3 bg-gray-800 border border-gray-700 rounded-xl text-white" value={trackingId} onChange={(e) => setTrackingId(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && trackProductOnBlockchain()} />
+                  <Button onClick={trackProductOnBlockchain} className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-6" disabled={trackingLoading}>
+                    {trackingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4 mr-2" />} Track
+                  </Button>
                 </div>
-              )}
+                {trackingResult && (
+                  <div className="p-5 bg-gradient-to-r from-gray-800 to-gray-800/50 rounded-xl border border-gray-700">
+                    <h4 className="font-semibold text-white mb-4">Product Details</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div><p className="text-xs text-gray-500">Name</p><p className="text-white">{trackingResult.product_name}</p></div>
+                      <div><p className="text-xs text-gray-500">Batch</p><p className="text-white font-mono text-sm">{trackingResult.batch_number}</p></div>
+                      <div><p className="text-xs text-gray-500">Owner</p><p className="text-white">{trackingResult.current_owner || 'Farmer'}</p></div>
+                      <div><p className="text-xs text-gray-500">Status</p><p className={`font-medium ${trackingResult.status === 'Sold Out' ? 'text-red-400' : 'text-green-400'}`}>{trackingResult.status || 'Available'}</p></div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
           {activeTab === "routes" && renderRoutesSection()}
 
           {activeTab === "retailers" && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-6 text-center py-8">
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-12 text-center">
               <Users className="h-16 w-16 text-blue-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">Retailer Network</h2>
-              <p className="text-gray-400">Coming soon</p>
+              <h2 className="text-2xl font-bold text-white mb-4">Retailer Network Coming Soon</h2>
             </div>
           )}
 
           {activeTab === "revenue" && (
-            <div className="bg-gray-900 rounded-lg border border-gray-800 p-6 text-center py-8">
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-12 text-center">
               <DollarSign className="h-16 w-16 text-blue-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">Revenue Analytics</h2>
-              <p className="text-gray-400">Coming soon</p>
+              <h2 className="text-2xl font-bold text-white mb-4">Revenue Analytics Coming Soon</h2>
             </div>
           )}
         </main>

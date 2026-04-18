@@ -1,19 +1,143 @@
 import Web3 from 'web3';
 import detectEthereumProvider from '@metamask/detect-provider';
 
-// This will be replaced with your actual contract ABI after compilation
-const contractABI: any[] = []; // You'll fill this after compiling your contract
+// Full ABI from your compiled KrishiSetu contract
+const contractABI = [
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "uint256", "name": "productId", "type": "uint256" },
+      { "indexed": true, "internalType": "address", "name": "farmer", "type": "address" },
+      { "indexed": false, "internalType": "string", "name": "productName", "type": "string" },
+      { "indexed": false, "internalType": "uint256", "name": "quantity", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "price", "type": "uint256" }
+    ],
+    "name": "ProductRegistered",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "uint256", "name": "productId", "type": "uint256" },
+      { "indexed": true, "internalType": "address", "name": "distributor", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "quantity", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ],
+    "name": "ProductPurchased",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "getAllProducts",
+    "outputs": [{ "internalType": "uint256[]", "name": "", "type": "uint256[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getAvailableProducts",
+    "outputs": [{ "internalType": "uint256[]", "name": "", "type": "uint256[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_farmer", "type": "address" }],
+    "name": "getFarmerProducts",
+    "outputs": [{ "internalType": "uint256[]", "name": "", "type": "uint256[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "_productId", "type": "uint256" }],
+    "name": "getProductDetails",
+    "outputs": [
+      { "internalType": "string", "name": "", "type": "string" },
+      { "internalType": "uint256", "name": "", "type": "uint256" },
+      { "internalType": "uint256", "name": "", "type": "uint256" },
+      { "internalType": "address", "name": "", "type": "address" },
+      { "internalType": "address", "name": "", "type": "address" },
+      { "internalType": "string", "name": "", "type": "string" },
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "productCounter",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "name": "products",
+    "outputs": [
+      { "internalType": "string", "name": "name", "type": "string" },
+      { "internalType": "uint256", "name": "quantity", "type": "uint256" },
+      { "internalType": "uint256", "name": "price", "type": "uint256" },
+      { "internalType": "address", "name": "farmer", "type": "address" },
+      { "internalType": "address", "name": "currentOwner", "type": "address" },
+      { "internalType": "string", "name": "location", "type": "string" },
+      { "internalType": "string", "name": "category", "type": "string" },
+      { "internalType": "uint256", "name": "timestamp", "type": "uint256" },
+      { "internalType": "bool", "name": "isAvailable", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "string", "name": "_name", "type": "string" },
+      { "internalType": "uint256", "name": "_quantity", "type": "uint256" },
+      { "internalType": "uint256", "name": "_price", "type": "uint256" },
+      { "internalType": "string", "name": "_location", "type": "string" },
+      { "internalType": "string", "name": "_category", "type": "string" }
+    ],
+    "name": "registerProduct",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "_productId", "type": "uint256" },
+      { "internalType": "uint256", "name": "_quantity", "type": "uint256" }
+    ],
+    "name": "purchaseProduct",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  }
+];
 
-// Ganache configuration
 const GANACHE_CONFIG = {
   networkId: '1337',
-  chainId: '0x539', // 1337 in hex
-  rpcUrl: 'http://127.0.0.1:7545', // Default Ganache GUI port
+  chainId: '0x539',
+  rpcUrl: 'http://127.0.0.1:7545',
   chainName: 'Ganache'
 };
 
-// This will be set after deployment
-let CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || '0x...';
+let CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || '0x17132d5b75Aa12A67881895573d043961349ba55';
+
+export interface RegistrationResult {
+  success: boolean;
+  productId?: number;
+  transactionHash?: string;
+  blockNumber?: number;
+  error?: string;
+}
+
+export interface PurchaseResult {
+  success: boolean;
+  transactionHash?: string;
+  error?: string;
+}
 
 export interface BlockchainProduct {
   id: number;
@@ -25,6 +149,8 @@ export interface BlockchainProduct {
   pricePerQuintal: number;
   registrationDate: number;
   gpsHash: string;
+  location: string;
+  category: string;
 }
 
 export interface BlockchainTransfer {
@@ -35,56 +161,51 @@ export interface BlockchainTransfer {
   timestamp: number;
 }
 
-export interface RegistrationResult {
-  success: boolean;
-  productId?: number;
-  transactionHash?: string;
-  blockNumber?: number;
-  error?: string;
-}
-
 class BlockchainService {
-  private web3: Web3 | null = null;
+  private web3: any = null;
   private contract: any = null;
   private account: string | null = null;
   private initialized: boolean = false;
 
   async init(): Promise<boolean> {
     try {
-      // Check if we're in browser environment
       if (typeof window === 'undefined') {
-        throw new Error('Not in browser environment');
+        return false;
       }
 
-      // Check if MetaMask is installed
       const provider = await detectEthereumProvider();
-      
       if (!provider) {
-        throw new Error('Please install MetaMask to use blockchain features');
+        console.warn('MetaMask not installed');
+        return false;
       }
 
-      // Initialize Web3
-      this.web3 = new Web3(provider as any);
+      this.web3 = new Web3(provider);
       
-      // Check if on correct network (Ganache)
+      // Check network
       const networkId = await this.web3.eth.net.getId();
       if (networkId.toString() !== GANACHE_CONFIG.networkId) {
         await this.switchToGanache();
       }
 
-      // Request account access
       const accounts = await this.web3.eth.requestAccounts();
       this.account = accounts[0];
 
-      // Initialize contract if ABI and address exist
-      if (contractABI.length > 0 && CONTRACT_ADDRESS !== '0x...') {
+      // Get contract address from localStorage or env
+      const savedAddress = localStorage.getItem('contractAddress');
+      if (savedAddress && savedAddress !== '0x...') {
+        CONTRACT_ADDRESS = savedAddress;
+      }
+
+      if (CONTRACT_ADDRESS && CONTRACT_ADDRESS !== '0x...') {
         this.contract = new this.web3.eth.Contract(contractABI, CONTRACT_ADDRESS);
+        this.initialized = true;
+        console.log('✅ Blockchain connected:', this.account);
+        console.log('✅ Contract address:', CONTRACT_ADDRESS);
+        return true;
       }
       
-      this.initialized = true;
-      console.log('✅ Blockchain connected:', this.account);
-      
-      return true;
+      console.warn('⚠️ Contract address not configured');
+      return false;
     } catch (error) {
       console.error('❌ Blockchain init error:', error);
       this.initialized = false;
@@ -99,7 +220,6 @@ class BlockchainService {
         params: [{ chainId: GANACHE_CONFIG.chainId }],
       });
     } catch (switchError: any) {
-      // If Ganache not added, add it
       if (switchError.code === 4902) {
         await (window as any).ethereum.request({
           method: 'wallet_addEthereumChain',
@@ -121,119 +241,122 @@ class BlockchainService {
   }
 
   async registerProduct(
-    name: string, 
-    gpsHash: string, 
-    quantity: number, 
-    price: number
+    name: string,
+    quantity: number,
+    price: number,
+    location: string,
+    category: string
   ): Promise<RegistrationResult> {
     if (!this.contract || !this.account) {
-      return {
-        success: false,
-        error: 'Blockchain not initialized or contract not deployed'
-      };
+      return { success: false, error: 'Contract not initialized' };
     }
 
     try {
-      // This is a placeholder - replace with actual contract call
-      console.log('📝 Registering on blockchain:', { name, gpsHash, quantity, price });
+      const tx = await this.contract.methods
+        .registerProduct(name, quantity, price, location, category)
+        .send({ from: this.account, gas: 500000 });
+
+      const productId = tx.events?.ProductRegistered?.returnValues?.productId;
       
-      // Simulate successful registration for now
       return {
         success: true,
-        productId: Math.floor(Math.random() * 1000),
-        transactionHash: '0x' + Math.random().toString(16).substring(2, 42),
-        blockNumber: Math.floor(Math.random() * 10000)
+        productId: parseInt(productId),
+        transactionHash: tx.transactionHash,
+        blockNumber: tx.blockNumber
       };
-      
     } catch (error: any) {
-      console.error('❌ Register on chain error:', error);
+      console.error('Registration error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // THIS IS THE PURCHASE METHOD - WAS MISSING
+  async purchaseProduct(
+    productId: number,
+    quantity: number,
+    pricePerQuint: number
+  ): Promise<PurchaseResult> {
+    if (!this.contract || !this.account) {
+      return { success: false, error: 'Contract not initialized' };
+    }
+
+    try {
+      const totalPrice = pricePerQuint * quantity;
+      const weiAmount = this.web3.utils.toWei(totalPrice.toString(), 'ether');
       
-      if (error.code === 4001) {
-        return {
-          success: false,
-          error: 'Transaction rejected by user'
-        };
-      }
+      console.log(`🛒 Purchasing product ${productId}: ${quantity} q @ ₹${pricePerQuint}/q = ₹${totalPrice}`);
+      console.log(`💰 Sending ${weiAmount} wei (${totalPrice} ETH)`);
+      
+      const tx = await this.contract.methods
+        .purchaseProduct(productId, quantity)
+        .send({
+          from: this.account,
+          value: weiAmount,
+          gas: 500000
+        });
+      
+      console.log('✅ Purchase transaction successful:', tx.transactionHash);
       
       return {
-        success: false,
-        error: error.message || 'Unknown error occurred'
+        success: true,
+        transactionHash: tx.transactionHash
       };
+    } catch (error: any) {
+      console.error('❌ Purchase error:', error);
+      
+      if (error.code === 4001) {
+        return { success: false, error: 'Transaction rejected by user' };
+      }
+      
+      return { success: false, error: error.message };
     }
   }
 
   async getProduct(productId: number): Promise<BlockchainProduct | null> {
-    if (!this.contract) {
-      return null;
-    }
+    if (!this.contract) return null;
 
     try {
-      // This is a placeholder - replace with actual contract call
+      const details = await this.contract.methods.getProductDetails(productId).call();
       return {
         id: productId,
-        name: 'Sample Product',
-        farmer: '0x1234...5678',
-        currentOwner: '0x1234...5678',
+        name: details[0],
+        farmer: details[3],
+        currentOwner: details[4],
         status: 0,
-        quantity: 100,
-        pricePerQuintal: 2000,
-        registrationDate: Math.floor(Date.now() / 1000),
-        gpsHash: '0x' + Math.random().toString(16).substring(2, 66)
+        quantity: parseInt(details[1]),
+        pricePerQuintal: parseInt(details[2]),
+        registrationDate: parseInt(details[6]),
+        gpsHash: details[5],
+        location: details[5],
+        category: ''
       };
     } catch (error) {
-      console.error('❌ Get product error:', error);
+      console.error('Get product error:', error);
       return null;
     }
   }
 
-  async getProductHistory(productId: number): Promise<BlockchainTransfer[]> {
-    if (!this.contract) {
-      return [];
-    }
+  async getFarmerProducts(farmerAddress: string): Promise<number[]> {
+    if (!this.contract) return [];
 
     try {
-      // This is a placeholder - replace with actual contract call
-      return [];
+      const products = await this.contract.methods.getFarmerProducts(farmerAddress).call();
+      return products.map((id: any) => parseInt(id));
     } catch (error) {
-      console.error('❌ Get history error:', error);
+      console.error('Get farmer products error:', error);
       return [];
     }
   }
 
-  async getProductsByFarmer(farmerAddress: string): Promise<number[]> {
-    if (!this.contract) {
-      return [];
-    }
+  async getAllProducts(): Promise<number[]> {
+    if (!this.contract) return [];
 
     try {
-      // This is a placeholder - replace with actual contract call
-      return [1, 2, 3];
+      const products = await this.contract.methods.getAllProducts().call();
+      return products.map((id: any) => parseInt(id));
     } catch (error) {
-      console.error('❌ Get farmer products error:', error);
+      console.error('Get all products error:', error);
       return [];
-    }
-  }
-
-  async transferToDistributor(productId: number, distributorAddress: string): Promise<any> {
-    if (!this.contract || !this.account) {
-      return {
-        success: false,
-        error: 'Blockchain not initialized'
-      };
-    }
-
-    try {
-      // This is a placeholder - replace with actual contract call
-      return {
-        success: true,
-        transactionHash: '0x' + Math.random().toString(16).substring(2, 42)
-      };
-    } catch (error: any) {
-      console.error('❌ Transfer error:', error);
-      return {
-        success: false,
-        error: error.message
-      };
     }
   }
 
@@ -245,34 +368,16 @@ class BlockchainService {
     return this.initialized;
   }
 
-  async signMessage(message: string): Promise<string | null> {
-    if (!this.web3 || !this.account) {
-      throw new Error('Blockchain not initialized');
-    }
-
-    try {
-      const signature = await this.web3.eth.personal.sign(
-        message, 
-        this.account, 
-        ''
-      );
-      return signature;
-    } catch (error) {
-      console.error('❌ Signing error:', error);
-      return null;
-    }
-  }
-
-  getWeb3(): Web3 | null {
-    return this.web3;
-  }
-
   setContractAddress(address: string) {
     CONTRACT_ADDRESS = address;
     localStorage.setItem('contractAddress', address);
-    if (this.web3 && contractABI.length > 0) {
+    if (this.web3 && contractABI) {
       this.contract = new this.web3.eth.Contract(contractABI, address);
     }
+  }
+
+  getContractAddress(): string {
+    return CONTRACT_ADDRESS;
   }
 }
 

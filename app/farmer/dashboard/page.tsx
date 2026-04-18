@@ -64,6 +64,7 @@ export default function FarmerDashboard() {
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<any>(null)
   const [products, setProducts] = useState<any[]>([])
+  const [availableProducts, setAvailableProducts] = useState<any[]>([]) // Only non-sold products
   const [newProduct, setNewProduct] = useState({
     product_name: "",
     category: "",
@@ -326,9 +327,16 @@ export default function FarmerDashboard() {
     }
   }
 
-  // Update stats whenever products change
+  // Update stats whenever products change - ONLY COUNT AVAILABLE PRODUCTS
   useEffect(() => {
-    updateFarmStats(products)
+    // Filter out sold out products
+    const available = products.filter(p => 
+      p.status !== 'Sold Out' && 
+      p.current_owner !== 'Sold Out' &&
+      p.blockchain_status !== 'sold out'
+    )
+    setAvailableProducts(available)
+    updateFarmStats(available)
   }, [products])
 
   // Load products from Supabase
@@ -353,13 +361,28 @@ export default function FarmerDashboard() {
         const savedProducts = localStorage.getItem('products')
         if (savedProducts) {
           console.log('🟡 Using localStorage products as fallback')
-          setProducts(JSON.parse(savedProducts))
+          const parsedProducts = JSON.parse(savedProducts)
+          setProducts(parsedProducts)
+          // Filter out sold out products
+          const available = parsedProducts.filter((p: any) => 
+            p.status !== 'Sold Out' && 
+            p.current_owner !== 'Sold Out' && 
+            p.blockchain_status !== 'sold out'
+          )
+          setAvailableProducts(available)
         }
         return
       }
 
       console.log('🟢 Successfully loaded products:', products?.length)
       setProducts(products || [])
+      // Filter out sold out products
+      const available = (products || []).filter(p => 
+        p.status !== 'Sold Out' && 
+        p.current_owner !== 'Sold Out' &&
+        p.blockchain_status !== 'sold out'
+      )
+      setAvailableProducts(available)
       localStorage.setItem('products', JSON.stringify(products || []))
 
     } catch (error) {
@@ -367,24 +390,32 @@ export default function FarmerDashboard() {
       const savedProducts = localStorage.getItem('products')
       if (savedProducts) {
         console.log('🟡 Using localStorage products as fallback due to error')
-        setProducts(JSON.parse(savedProducts))
+        const parsedProducts = JSON.parse(savedProducts)
+        setProducts(parsedProducts)
+        // Filter out sold out products
+        const available = parsedProducts.filter((p: any) => 
+          p.status !== 'Sold Out' && 
+          p.current_owner !== 'Sold Out' && 
+          p.blockchain_status !== 'sold out'
+        )
+        setAvailableProducts(available)
       }
     } finally {
       setLoading(false)
     }
   }
 
-  // Update farm stats based on products
-  const updateFarmStats = (products: any[]) => {
-    const totalProducts = products.length
+  // Update farm stats based on available products only
+  const updateFarmStats = (availableProducts: any[]) => {
+    const totalProducts = availableProducts.length
     
-    const totalRevenue = products.reduce((sum, product) => {
+    const totalRevenue = availableProducts.reduce((sum, product) => {
       const quantity = product.quantity || 0
       const pricePerQuintal = product.price_per_quintal || 0
       return sum + (quantity * pricePerQuintal)
     }, 0)
     
-    const activeCrops = products.filter(product => {
+    const activeCrops = availableProducts.filter(product => {
       try {
         if (product.harvest_date) {
           const harvestDate = new Date(product.harvest_date)
@@ -407,7 +438,7 @@ export default function FarmerDashboard() {
       },
       { 
         label: "Blockchain Verified", 
-        value: products.filter(p => p.blockchain_tx).length.toString(), 
+        value: availableProducts.filter(p => p.blockchain_tx).length.toString(), 
         icon: Shield,
         color: "text-green-400"
       },
@@ -851,7 +882,7 @@ export default function FarmerDashboard() {
 
   return (
     <div className="min-h-screen bg-black flex">
-      {/* Sidebar - same as before */}
+      {/* Sidebar */}
       <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center gap-3">
@@ -1129,7 +1160,7 @@ export default function FarmerDashboard() {
 
           {activeTab === "dashboard" && (
             <div className="space-y-6">
-              {/* Farm Stats */}
+              {/* Farm Stats - Based on available products only */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {farmStats.map((stat, index) => (
                   <div key={index} className="bg-gray-900 rounded-lg border border-gray-800 p-6 shadow-sm">
@@ -1195,9 +1226,11 @@ export default function FarmerDashboard() {
                 </div>
               </div>
 
-              {/* Recent Products */}
+              {/* Recent Products - Shows ONLY available products (not Sold Out) */}
               <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Recent Products</h3>
+                <h3 className="text-lg font-semibold text-white mb-4">
+                  Recent Products ({availableProducts.length} available)
+                </h3>
                 {loading ? (
                   <div className="text-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500 mx-auto"></div>
@@ -1205,7 +1238,7 @@ export default function FarmerDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {products.slice(0, 5).map((product, index) => {
+                    {availableProducts.slice(0, 5).map((product, index) => {
                       const qualityGrade = getQualityGrade(product)
                       return (
                         <div key={index} className="flex justify-between items-center p-3 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
@@ -1238,11 +1271,8 @@ export default function FarmerDashboard() {
                                 <p className="text-sm text-white font-semibold">
                                   Total: ₹{(product.quantity * product.price_per_quintal).toLocaleString()}
                                 </p>
-                                <span className={`text-xs px-2 py-1 rounded-full ${
-                                  product.status === 'Registered' ? 'bg-green-900 text-green-400' :
-                                  'bg-yellow-900 text-yellow-400'
-                                }`}>
-                                  {product.status || 'Registered'}
+                                <span className="text-xs bg-green-900 text-green-400 px-2 py-1 rounded-full">
+                                  Available
                                 </span>
                               </div>
                             </div>
@@ -1272,12 +1302,21 @@ export default function FarmerDashboard() {
                       )
                     })}
                     
-                    {products.length === 0 && (
+                    {availableProducts.length === 0 && (
                       <div className="text-center py-8 text-gray-500">
                         <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p className="text-gray-400">No products registered yet.</p>
+                        <p className="text-gray-400">No available products</p>
                         <p className="text-sm text-gray-500">Register your first product to get started!</p>
                       </div>
+                    )}
+                    
+                    {availableProducts.length > 5 && (
+                      <button 
+                        onClick={() => setActiveTab("blockchain")}
+                        className="mt-3 text-sm text-green-500 hover:text-green-400 text-center w-full"
+                      >
+                        View all {availableProducts.length} products →
+                      </button>
                     )}
                   </div>
                 )}
@@ -1619,11 +1658,11 @@ export default function FarmerDashboard() {
                   </Button>
                 </div>
 
-                {products.length > 0 && (
+                {availableProducts.length > 0 && (
                   <div className="mb-4">
-                    <p className="text-sm text-gray-400 mb-2">Quick search from your products:</p>
+                    <p className="text-sm text-gray-400 mb-2">Quick search from your active products:</p>
                     <div className="flex flex-wrap gap-2">
-                      {products.slice(0, 5).map((product) => (
+                      {availableProducts.slice(0, 5).map((product) => (
                         <button
                           key={product.id}
                           onClick={() => {
@@ -1743,11 +1782,11 @@ export default function FarmerDashboard() {
                 )}
               </div>
 
-              {/* Products List */}
+              {/* My Products List - Shows ONLY available products (not Sold Out) */}
               <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <History className="h-5 w-5 text-green-500" />
-                  My Products ({products.length})
+                  My Active Products ({availableProducts.length})
                 </h3>
                 {loading ? (
                   <div className="text-center py-8">
@@ -1756,97 +1795,94 @@ export default function FarmerDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {products.map((product, index) => {
-                      const qualityGrade = getQualityGrade(product)
-                      return (
-                        <div key={index} className="p-4 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-medium text-white">{product.product_name}</p>
-                                {product.blockchain_verified ? (
-                                  <span className="text-xs bg-green-900 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <Shield className="h-3 w-3" />
-                                    Blockchain
-                                  </span>
-                                ) : (
-                                  <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">
-                                    Database Only
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-400">
-                                {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
-                              </p>
-                              <p className="text-xs text-gray-500 flex items-center gap-1">
-                                <MapPin className="h-3 w-3" />
-                                {product.farm_location}
-                                {product.batch_number && ` • Batch: ${product.batch_number}`}
-                              </p>
-                              
-                              <div className="flex flex-wrap gap-1 mt-2">
-                                {qualityGrade && (
-                                  <span className={`text-xs px-2 py-1 rounded-full ${
-                                    qualityGrade === 'A' ? 'bg-green-900 text-green-400' :
-                                    qualityGrade === 'B' ? 'bg-blue-900 text-blue-400' :
-                                    qualityGrade === 'C' ? 'bg-yellow-900 text-yellow-400' :
-                                    qualityGrade === 'D' ? 'bg-orange-900 text-orange-400' :
-                                    'bg-purple-900 text-purple-400'
-                                  }`}>
-                                    Quality: {qualityGrade}
-                                  </span>
-                                )}
-                                {product.blockchain_id && (
-                                  <button
-                                    onClick={() => verifyProductOnBlockchain(product)}
-                                    disabled={verifyingBlockchain}
-                                    className="text-xs bg-green-900 text-green-400 px-2 py-1 rounded-full hover:bg-green-800 transition-colors flex items-center gap-1"
-                                  >
-                                    {verifyingBlockchain && selectedProductForBlockchain?.id === product.id ? (
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                    ) : (
+                    {availableProducts.length > 0 ? (
+                      availableProducts.map((product, index) => {
+                        const qualityGrade = getQualityGrade(product)
+                        return (
+                          <div key={index} className="p-4 hover:bg-gray-800 rounded-lg border border-gray-700 transition-colors">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-medium text-white">{product.product_name}</p>
+                                  {product.blockchain_verified ? (
+                                    <span className="text-xs bg-green-900 text-green-400 px-2 py-0.5 rounded-full flex items-center gap-1">
                                       <Shield className="h-3 w-3" />
-                                    )}
-                                    Verify
-                                  </button>
+                                      Blockchain
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">
+                                      Database Only
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-400">
+                                  {product.category} • {product.quantity} quintals • ₹{product.price_per_quintal}/quintal
+                                </p>
+                                <p className="text-xs text-gray-500 flex items-center gap-1">
+                                  <MapPin className="h-3 w-3" />
+                                  {product.farm_location}
+                                  {product.batch_number && ` • Batch: ${product.batch_number}`}
+                                </p>
+                                
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {qualityGrade && (
+                                    <span className={`text-xs px-2 py-1 rounded-full ${
+                                      qualityGrade === 'A' ? 'bg-green-900 text-green-400' :
+                                      qualityGrade === 'B' ? 'bg-blue-900 text-blue-400' :
+                                      qualityGrade === 'C' ? 'bg-yellow-900 text-yellow-400' :
+                                      qualityGrade === 'D' ? 'bg-orange-900 text-orange-400' :
+                                      'bg-purple-900 text-purple-400'
+                                    }`}>
+                                      Quality: {qualityGrade}
+                                    </span>
+                                  )}
+                                  {product.blockchain_id && (
+                                    <button
+                                      onClick={() => verifyProductOnBlockchain(product)}
+                                      disabled={verifyingBlockchain}
+                                      className="text-xs bg-green-900 text-green-400 px-2 py-1 rounded-full hover:bg-green-800 transition-colors flex items-center gap-1"
+                                    >
+                                      {verifyingBlockchain && selectedProductForBlockchain?.id === product.id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : (
+                                        <Shield className="h-3 w-3" />
+                                      )}
+                                      Verify
+                                    </button>
+                                  )}
+                                </div>
+
+                                {product.blockchain_tx && (
+                                  <div className="mt-2 text-xs">
+                                    <p className="text-gray-500">
+                                      TX: {product.blockchain_tx.substring(0, 20)}...
+                                      <button 
+                                        onClick={() => copyToClipboard(product.blockchain_tx)}
+                                        className="ml-2 text-blue-400 hover:text-blue-300"
+                                      >
+                                        <Copy className="h-3 w-3 inline" />
+                                      </button>
+                                    </p>
+                                  </div>
                                 )}
                               </div>
-
-                              {product.blockchain_tx && (
-                                <div className="mt-2 text-xs">
-                                  <p className="text-gray-500">
-                                    TX: {product.blockchain_tx.substring(0, 20)}...
-                                    <button 
-                                      onClick={() => copyToClipboard(product.blockchain_tx)}
-                                      className="ml-2 text-blue-400 hover:text-blue-300"
-                                    >
-                                      <Copy className="h-3 w-3 inline" />
-                                    </button>
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right ml-4">
-                              <p className="text-sm text-white font-semibold">
-                                ₹{(product.quantity * product.price_per_quintal).toLocaleString()}
-                              </p>
-                              <span className={`text-xs px-2 py-1 rounded-full ${
-                                product.status === 'Registered' ? 'bg-green-900 text-green-400' :
-                                'bg-yellow-900 text-yellow-400'
-                              }`}>
-                                {product.status || 'Registered'}
-                              </span>
+                              <div className="text-right ml-4">
+                                <p className="text-sm text-white font-semibold">
+                                  ₹{(product.quantity * product.price_per_quintal).toLocaleString()}
+                                </p>
+                                <span className="text-xs bg-green-900 text-green-400 px-2 py-1 rounded-full">
+                                  Available
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )
-                    })}
-                    
-                    {products.length === 0 && (
+                        )
+                      })
+                    ) : (
                       <div className="text-center py-8 text-gray-500">
                         <Shield className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p className="text-gray-400">No products registered yet.</p>
-                        <p className="text-sm text-gray-500">Register your first product above to get started!</p>
+                        <p className="text-gray-400">No active products available</p>
+                        <p className="text-sm text-gray-500">Register a new product to get started!</p>
                       </div>
                     )}
                   </div>

@@ -132,12 +132,9 @@ export default function RegisterPage() {
                         <SelectValue placeholder="Select your role" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
                         <SelectItem value="farmer">Farmer</SelectItem>
-                        <SelectItem value="manufacturer">Manufacturer</SelectItem>
                         <SelectItem value="distributor">Distributor</SelectItem>
-                        <SelectItem value="retailer">Retailer</SelectItem>
-                      </SelectContent>
+                        </SelectContent>
                     </Select>
                   </div>
 
